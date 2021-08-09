@@ -24,6 +24,12 @@
    - New options -A, -S, -C
    - Support for filesystems > 2GB
    - FAT32 support
+
+   Fixes/additions June 2003 by Sam Bingner
+   <sam@bingner.com>:
+   - Add -B option to read in bootcode from a file
+   - Write BIOS drive number so that FS can properly boot
+   - Set number of hidden sectors before boot code to be one track
    
    Copying:     Copyright 1993, 1994 David Hudson (dave@humbug.demon.co.uk)
 
@@ -153,6 +159,8 @@ cdiv (int a, int b)
 #define FAT_BAD      0x0ffffff7
 
 #define MSDOS_EXT_SIGN 0x29	/* extended boot sector signature */
+#define HD_DRIVE_NUMBER 0x80	/* Boot off first hard drive */
+#define FD_DRIVE_NUMBER 0x00	/* Boot off first floppy drive */
 #define MSDOS_FAT12_SIGN "FAT12   "	/* FAT12 filesystem signature */
 #define MSDOS_FAT16_SIGN "FAT16   "	/* FAT16 filesystem signature */
 #define MSDOS_FAT32_SIGN "FAT32   "	/* FAT32 filesystem signature */
@@ -174,6 +182,8 @@ cdiv (int a, int b)
 
 #define BOOTCODE_SIZE		448
 #define BOOTCODE_FAT32_SIZE	420
+
+#define MAX_RESERVED		0xFFFF
 
 /* __attribute__ ((packed)) is used on all structures to make gcc ignore any
  * alignments */
@@ -202,7 +212,7 @@ struct msdos_boot_sector
   __u16         fat_length;	/* sectors/FAT */
   __u16         secs_track;	/* sectors per track */
   __u16         heads;		/* number of heads */
-  __u32         hidden;		/* hidden sectors (unused) */
+  __u32         hidden;		/* hidden sectors (one track) */
   __u32         total_sect;	/* number of sectors (if sectors == 0) */
   union {
     struct {
@@ -285,6 +295,8 @@ char dummy_boot_code[BOOTCODE_SIZE] =
 
 /* Global variables - the root of all evil :-) - see these and weep! */
 
+static char *template_boot_code;	/* Variable to store a full template boot sector in */
+static int use_template = 0;
 static char *program_name = "mkdosfs";	/* Name of the program */
 static char *device_name = NULL;	/* Name of the device on which to create the filesystem */
 static int atari_format = 0;	/* Use Atari variation of MS-DOS FS format */
@@ -837,6 +849,12 @@ setup_tables (void)
     vi->volume_id[2] = (unsigned char) ((volume_id & 0x00ff0000) >> 16);
     vi->volume_id[3] = (unsigned char) (volume_id >> 24);
   }
+  if (bs.media == 0xf8) {
+      vi->drive_number = HD_DRIVE_NUMBER;  /* Set bios drive number to 80h */
+  }
+  else {
+      vi->drive_number = FD_DRIVE_NUMBER;  /* Set bios drive number to 00h */
+  }
 
   if (!atari_format) {
     memcpy(vi->volume_label, volume_name, 11);
@@ -881,7 +899,7 @@ setup_tables (void)
     printf( "Using %d reserved sectors\n", reserved_sectors );
   bs.fats = (char) nr_fats;
   if (!atari_format || size_fat == 32)
-    bs.hidden = CT_LE_L(hidden_sectors);
+    bs.hidden = bs.secs_track;
   else {
     /* In Atari format, hidden is a 16 bit field */
     __u16 hidden = CT_LE_W(hidden_sectors);
@@ -1362,6 +1380,32 @@ write_tables (void)
    * dir area on FAT12/16, and the first cluster on FAT32. */
   writebuf( (char *) root_dir, size_root_dir, "root directory" );
 
+  if (use_template == 1) {
+    /* dupe template into reserved sectors */
+    seekto( 0, "Start of partition" );
+    if (size_fat == 32) {
+      writebuf( template_boot_code, 3, "backup jmpBoot" );
+      seekto( 0x5a, "sector 1 boot area" );
+      writebuf( template_boot_code+0x5a, 420, "sector 1 boot area" );
+      seekto( 512*2, "third sector" );
+      if (backup_boot != 0) {
+        writebuf( template_boot_code+512*2, backup_boot*sector_size - 512*2, "data to backup boot" );
+	seekto( backup_boot*sector_size, "backup boot sector" );
+        writebuf( template_boot_code, 3, "backup jmpBoot" );
+	seekto( backup_boot*sector_size+0x5a, "backup boot sector boot area" );
+        writebuf( template_boot_code+0x5a, 420, "backup boot sector boot area" );
+        seekto( (backup_boot+2)*sector_size, "sector following backup code" );
+        writebuf( template_boot_code+(backup_boot+2)*sector_size, (reserved_sectors-backup_boot-2)*512, "remaining data" );
+      } else {
+        writebuf( template_boot_code+512*2, (reserved_sectors-2)*512, "remaining data" );
+      }
+    } else {
+      writebuf( template_boot_code, 3, "jmpBoot" );
+      seekto( 0x3e, "sector 1 boot area" );
+      writebuf( template_boot_code+0x3e, 448, "boot code" );
+    }
+  }
+
   if (blank_sector) free( blank_sector );
   if (info_sector) free( info_sector );
   free (root_dir);   /* Free up the root directory space from setup_tables */
@@ -1376,7 +1420,7 @@ usage (void)
 {
   fatal_error("\
 Usage: mkdosfs [-A] [-c] [-C] [-v] [-I] [-l bad-block-file] [-b backup-boot-sector]\n\
-       [-m boot-msg-file] [-n volume-name] [-i volume-id]\n\
+       [-m boot-msg-file] [-n volume-name] [-i volume-id] [-B bootcode]\n\
        [-s sectors-per-cluster] [-S logical-sector-size] [-f number-of-FATs]\n\
        [-h hidden-sectors] [-F fat-size] [-r root-dir-entries] [-R reserved-sectors]\n\
        /dev/name [blocks]\n");
@@ -1440,7 +1484,7 @@ main (int argc, char **argv)
   printf ("%s " VERSION " (" VERSION_DATE ")\n",
 	   program_name);
 
-  while ((c = getopt (argc, argv, "Ab:cCf:F:Ii:l:m:n:r:R:s:S:h:v")) != EOF)
+  while ((c = getopt (argc, argv, "AB:b:cCf:F:Ii:l:m:n:r:R:s:S:h:v")) != EOF)
     /* Scan the command line for options */
     switch (c)
       {
@@ -1508,6 +1552,51 @@ main (int argc, char **argv)
 
       case 'l':		/* l : Bad block filename */
 	listfile = optarg;
+	break;
+
+      case 'B':         /* B : read in bootcode */
+        if ( strcmp(optarg, "-") )
+	  {
+	    msgfile = fopen(optarg, "r");
+	    if ( !msgfile )
+	      perror(optarg);
+	  }
+	else
+	  msgfile = stdin;
+
+	if ( msgfile )
+	  {
+            if (!(template_boot_code = malloc( MAX_RESERVED )))
+                die( "Out of memory" );
+	    /* The template boot sector including reserved must not be > 65535 */
+            use_template = 1;
+	    i = 0;
+	    do
+	      {
+		ch = getc(msgfile);
+		switch (ch)
+		  {
+		  case EOF:
+		    break;
+
+		  default:
+		    template_boot_code[i++] = ch; /* Store character */
+		    break;
+		  }
+	      }
+	    while ( ch != EOF && i < MAX_RESERVED );
+	    ch = getc(msgfile); /* find out if we're at EOF */
+
+	    /* Fill up with zeros */
+	    while( i < MAX_RESERVED )
+		template_boot_code[i++] = '\0';
+
+	    if ( ch != EOF )
+	      printf ("Warning: template too long; truncated after %d bytes\n", i);
+
+	    if ( msgfile != stdin )
+	      fclose(msgfile);
+	  }
 	break;
 
       case 'm':		/* m : Set boot message */

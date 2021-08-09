@@ -44,6 +44,10 @@
 .I message-file
 ]
 [
+.B \-B
+.I bootcode-file
+]
+[
 .B \-n
 .I volume-name
 ]
@@ -162,6 +166,18 @@ without having properly installed an operating system.  The message
 file must not exceed 418 bytes once line feeds have been converted to
 carriage return-line feed combinations, and tabs have been expanded.
 If the filename is a hyphen (-), the text is taken from standard input. 
+.TP
+.BI \-B " bootcode-file"
+Uses boot machine code from file "file".  On any thing other than FAT32,
+this only writes the first 3 bytes, and 480 bytes from offset 3Eh.  On
+FAT32, this writes the first 3 bytes, 420 bytes from offset 5Ah to both
+primary and backup boot sectors.  Also writes all other reserved sectors
+excluding the sectors following boot sectors (usually sector 2 and 7).
+Does not require that the input file be as large as reserved_sectors*512.
+To make a FAT32 partition bootable, you will need at least the first
+13 sectors (6656 bytes).  You can also specify a partition as the argument
+to clone the boot code from that partition.
+i.e mkdosfs -B /dev/sda1 /dev/sda1
 .TP
 .BI \-n " volume-name"
 Sets the volume name (label) of the file system.  The volume name can

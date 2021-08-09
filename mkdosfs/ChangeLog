@@ -1,3 +1,14 @@
+19th June 2003			Sam Bingner (sam@bingner.com)
+
+	Added option to read in bootcode from a file so that if you have
+	for example Windows 2000 boot code, you can have it write that
+	as the bootcode.  This is a dump of the behinning of a partition
+	generally 512 bytes, but can be up to reserved sectors*512 bytes.
+	Also writes 0x80 as the BIOS drive number if we are formatting a
+	hard drive, and sets the number of hidden sectors to be the
+	number of sectors in one track. These were required so that DOS
+	could boot using the bootcode.
+
 28th January 1995		H. Peter Anvin (hpa@yggdrasil.com)
 
 	Better algorithm to select cluster sizes on large filesystems.
