@@ -2449,6 +2449,8 @@ void clean_dirty_flag(DOS_FS *fs)
                 if (fs->fat_state & FAT_STATE_DIRTY) {
                     vi->state &= ~FAT_STATE_DIRTY;
                     fs_write_immed(0, sizeof(b), &b);
+                    if (fs->backupboot_start)
+                        fs_write_immed(fs->backupboot_start, sizeof(b), &b);
                 }
                 fs->fat_state &= ~FAT_STATE_DIRTY;
 
