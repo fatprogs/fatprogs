@@ -237,11 +237,11 @@ static void read_fat_cache(DOS_FS *fs, uint32_t cluster)
         mmap_offset = fs->fat_start + cluster * fs->fat_bits / BITS_PER_BYTE;
         aligned_offset = mmap_offset & ~(sysconf(_SC_PAGE_SIZE) - 1);
 
-        /* fat_start is already page algined address */
+        /* fat_start is already page aligned address */
         if (fs->fat_cache.diff == 0) {
             fs->fat_cache.cnt = fs->fat_cache.cpc;
             fs->fat_cache.start = (cluster >= FAT_START_ENT) ?
-                ((cluster - 1) / fs->fat_cache.cpc) *  fs->fat_cache.cpc : 0;
+                (cluster / fs->fat_cache.cpc) *  fs->fat_cache.cpc : 0;
         }
         /* fat_start is not page aligned address */
         else {
@@ -424,6 +424,11 @@ loff_t cluster_start(DOS_FS *fs, uint32_t cluster)
         ((loff_t)cluster - FAT_START_ENT) * (unsigned long long)fs->cluster_size;
 }
 
+inline void init_alloc_cluster(void)
+{
+    alloc_clusters = 0;
+}
+
 inline void inc_alloc_cluster(void)
 {
     alloc_clusters++;
@@ -448,16 +453,28 @@ inline void clear_bitmap_reclaim(DOS_FS *fs, uint32_t cluster)
 
 inline void set_bitmap_occupied(DOS_FS *fs, uint32_t cluster)
 {
-    set_bit(cluster, fs->real_bitmap);
-    set_bit(cluster, fs->bitmap);
-    alloc_clusters++;
+    if (!test_bit(cluster, fs->real_bitmap)) {
+        alloc_clusters++;
+        set_bit(cluster, fs->real_bitmap);
+        set_bit(cluster, fs->bitmap);
+    }
 }
 
 inline void clear_bitmap_occupied(DOS_FS *fs, uint32_t cluster)
 {
-    clear_bit(cluster, fs->real_bitmap);
+#if 0
+    if (test_bit(cluster, fs->real_bitmap)) {
+        clear_bit(cluster, fs->real_bitmap);
+        clear_bit(cluster, fs->bitmap);
+        alloc_clusters--;
+    }
+#else
     clear_bit(cluster, fs->bitmap);
-    alloc_clusters--;
+    if (test_bit(cluster, fs->real_bitmap)) {
+        clear_bit(cluster, fs->real_bitmap);
+        alloc_clusters--;
+    }
+#endif
 }
 
 void fix_bad(DOS_FS *fs)
@@ -481,7 +498,6 @@ void fix_bad(DOS_FS *fs)
             if (!fs_test(cluster_start(fs, i), fs->cluster_size)) {
                 printf("Cluster %u is unreadable.\n", i);
                 set_fat(fs, i, -2);
-                /* TODO: check if clear_occupied is needed */
                 clear_bitmap_occupied(fs, i);
             }
         }

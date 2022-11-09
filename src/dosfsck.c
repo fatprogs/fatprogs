@@ -131,9 +131,10 @@ int main(int argc, char **argv)
     read_boot(&fs);
 
     if (verify)
-        printf("Starting check/repair pass.\n");
+        printf("\nStarting check/repair pass.\n");
 
     do {
+        n_files = 0;
         read_fat(&fs);
 
         if (check_dirty &&
@@ -180,7 +181,7 @@ int main(int argc, char **argv)
     qfree(&mem_queue);
 
     if (verify) {
-        printf("Starting verification pass.\n");
+        printf("\nStarting verification pass.\n");
         n_files = 0;
         read_fat(&fs);
         scan_root(&fs);

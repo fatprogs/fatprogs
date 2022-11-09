@@ -49,7 +49,7 @@ static void dump_boot(DOS_FS *fs, struct boot_sector *b, unsigned lss)
 {
     unsigned short sectors;
 
-    printf("Boot sector contents:\n");
+    printf("\nBoot sector contents:\n");
 
     if (!atari_format) {
         char id[9];
@@ -99,6 +99,7 @@ static void dump_boot(DOS_FS *fs, struct boot_sector *b, unsigned lss)
             CF_LE_L(b->hidden));
     sectors = GET_UNALIGNED_W(b->sectors);
     printf("%10u sectors total\n", sectors ? sectors : CF_LE_L(b->total_sect));
+    printf("==========================================================\n");
 }
 
 static void check_backup_boot(DOS_FS *fs, struct boot_sector *b, int lss)

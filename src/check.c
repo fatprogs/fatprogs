@@ -369,8 +369,21 @@ static int bad_name(unsigned char *name)
     return 0;
 }
 
+static void clear_drop_file(DOS_FS *fs, DOS_FILE *file)
+{
+    uint32_t curr;
+
+    for (curr = FSTART(file, fs);
+            curr > 0 && curr < fs->clusters + FAT_START_ENT;
+            curr = next_cluster(fs, curr)) {
+        clear_bit(curr, fs->real_bitmap);
+        dec_alloc_cluster();
+    }
+}
+
 static void drop_file(DOS_FS *fs, DOS_FILE *file)
 {
+#if 0
     uint32_t cluster;
     int skip_set_owner = 0;
 
@@ -380,16 +393,20 @@ static void drop_file(DOS_FS *fs, DOS_FILE *file)
             strncmp((char *)file->dir_ent.name, MSDOS_DOTDOT, LEN_FILE_NAME)) {
         skip_set_owner = 1;
     }
+#endif
 
     remove_lfn(fs, file);
     MODIFY(file, name[0], DELETED_FLAG);
+#if 0
     if (!skip_set_owner) {
         for (cluster = FSTART(file, fs);
                 cluster > 0 && cluster < fs->clusters + FAT_START_ENT;
                 cluster = next_cluster(fs, cluster)) {
-            clear_bitmap_occupied(fs, cluster);
+            if (test_bit(cluster, fs->real_bitmap))
+                clear_bitmap_occupied(fs, cluster);
         }
     }
+#endif
     --n_files;
 }
 
@@ -406,7 +423,6 @@ static void truncate_file(DOS_FS *fs, DOS_FILE *file, uint32_t clusters)
         next = next_cluster(fs, walk);
         if (deleting) {
             set_fat(fs, walk, 0);
-            /* TODO: is it needed calling clear_bitmap_occupied() */
             clear_bitmap_occupied(fs, walk);
         }
         else if ((deleting = !--clusters)) {
@@ -652,13 +668,32 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
             return 0;
         }
 
+        if (file->parent &&
+                FSTART(file, fs) == FSTART(file->parent, fs)) {
+            printf("%s\n  Start cluster point itself. Deleting dir.\n", path_name(file));
+            remove_lfn(fs, file);
+            MODIFY(file, name[0], DELETED_FLAG);
+            MODIFY_START(file, 0, fs);
+            return 0;
+        }
+
+        if (file->parent && file->parent->parent &&
+                FSTART(file, fs) == FSTART(file->parent->parent, fs)) {
+            printf("%s  Start cluster point it's parent. Deleting dir.\n", path_name(file));
+            remove_lfn(fs, file);
+            MODIFY(file, name[0], DELETED_FLAG);
+            MODIFY_START(file, 0, fs);
+            return 0;
+        }
+
         if (FSTART(file, fs) == 0) {
-            printf ("%s\n  Start does point to root directory. Deleting dir. \n",
+            printf ("%s\n  Start does point to root directory. Deleting dir.\n",
                     path_name(file));
             remove_lfn(fs, file);
             MODIFY(file, name[0], DELETED_FLAG);
             return 0;
         }
+
     }
 
     if (FSTART(file, fs) >= fs->clusters + FAT_START_ENT) {
@@ -779,12 +814,13 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
                         MODIFY(owner, size,
                                 CT_LE_L((unsigned long long)clusters2 *
                                     fs->cluster_size));
+                        printf("  Truncate first file(%s) to %llu bytes.\n",
+                                path_name(owner),
+                                (unsigned long long)clusters2 * fs->cluster_size);
                         if (restart)
                             return 1;
 
                         while (this > 0 && this != -1) {
-                            /* TODO: is it need to call set_fat()? */
-                            set_fat(fs, this, 0);
                             clear_bitmap_occupied(fs, this);
                             this = next_cluster(fs, this);
                         }
@@ -833,7 +869,7 @@ truncate_second:
 static int check_files(DOS_FS *fs, DOS_FILE *start)
 {
     while (start) {
-        if (check_file(fs, start))
+        if (!IS_FREE(start->dir_ent.name) && check_file(fs, start))
             return 1;
         start = start->next;
     }
@@ -884,6 +920,7 @@ static int check_dir(DOS_FS *fs, DOS_FILE **root, int dots)
     redo = 0;
     walk = root;
     while (*walk) {
+        /* bad name check */
         if (!((*walk)->dir_ent.attr & ATTR_VOLUME) &&
                 bad_name((*walk)->dir_ent.name)) {
 
@@ -902,6 +939,15 @@ static int check_dir(DOS_FS *fs, DOS_FILE **root, int dots)
             switch (interactive ? get_key("1234", "?") : '3') {
                 case '1':
                     drop_file(fs, *walk);
+#if 0
+                    clear_drop_file(fs, *walk);
+                    for (clus_num = FSTART(parent, fs);
+                            clus_num > 0 && clus_num < fs->clusters + FAT_START_ENT;
+                            clus_num = next_cluster(fs, clus_num)) {
+                        clear_bit(clus_num, fs->real_bitmap);
+                        dec_alloc_cluster();
+                    }
+#endif
                     walk = &(*walk)->next;
                     continue;
                 case '2':
@@ -1058,7 +1104,8 @@ static void check_file_chain(DOS_FS *fs, DOS_FILE *file, int read_test)
                 clear_bitmap_occupied(fs, curr);
             }
         }
-        set_bitmap_occupied(fs, curr);
+        /* temporary set real_bitmap */
+        set_bit(curr, fs->real_bitmap);
     }
 
     for (curr = FSTART(file, fs);
@@ -1068,7 +1115,8 @@ static void check_file_chain(DOS_FS *fs, DOS_FILE *file, int read_test)
         if (!clusters--)
             break;
 
-        clear_bitmap_occupied(fs, curr);
+        /* clear real_bitmap */
+        clear_bit(curr, fs->real_bitmap);
     }
 }
 
@@ -1152,13 +1200,12 @@ static void add_file(DOS_FS *fs, DOS_FILE ***chain, DOS_FILE *parent,
 
 #if 1
         if (interactive)
-            printf("1: Delete.\n"
-                    "2: Auto-rename.\n"
-                    "3: Leave it.\n");
+            printf("1) Delete.\n"
+                    "2) Auto-rename.\n");
         else
-            printf("  Auto-deleting.\n");
+            printf("  Auto-renaming.\n");
 
-        switch (interactive ? get_key("123", "?") : '1') {
+        switch (interactive ? get_key("12", "?") : '2') {
             case '1':
                 de.name[0] = DELETED_FLAG;
                 fs_write(offset, sizeof(DIR_ENT), &de);
@@ -1166,13 +1213,11 @@ static void add_file(DOS_FS *fs, DOS_FILE ***chain, DOS_FILE *parent,
             case '2':
                 rename_flag = 1;
                 break;
-            case '3':
-                break;
         }
 #else
         if (interactive)
             printf("1: Delete.\n"
-                    "2: Leave it.\n");
+                    "2: Keep it.\n");
         else
             printf("  Auto-deleting.\n");
 
@@ -1308,7 +1353,10 @@ int scan_root(DOS_FS *fs)
 
     root = NULL;
     chain = &root;
+
+    init_alloc_cluster();
     new_dir();
+
     if (fs->root_cluster) {
         add_file(fs, &chain, NULL, 0, &fp_root);
     }
@@ -2308,6 +2356,16 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
             }
             case '2':
                 drop_file(fs, parent);
+                /* parent entry already set real_bitmap and allocation count */
+                clear_drop_file(fs, parent);
+#if 0
+                for (clus_num = FSTART(parent, fs);
+                        clus_num > 0 && clus_num < fs->clusters + FAT_START_ENT;
+                        clus_num = next_cluster(fs, clus_num)) {
+                    clear_bit(clus_num, fs->real_bitmap);
+                    dec_alloc_cluster();
+                }
+#endif
                 return 1;
         }
         return 0;
@@ -2355,6 +2413,7 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
             break;
         case '2':
             drop_file(fs, parent);
+            clear_drop_file(fs, parent);
             return 1;
         case '3':
             add_dot_entries(fs, parent, dots);
@@ -2408,9 +2467,13 @@ void clean_dirty_flag(DOS_FS *fs)
     get_fat(fs, 1, &value);
 
     if ((fs->fat_state & FAT_STATE_DIRTY) || !(value & dirty_mask)) {
+        printf("FAT dirty flag is set. Boot(%s):FAT(%s)\n",
+                (fs->fat_state & FAT_STATE_DIRTY) ? "dirty" : "clean",
+                (value & dirty_mask) == dirty_mask ? "clean" : "dirty");
+
         if (interactive) {
             printf("1) Clean dity flag\n"
-                    "2) Leave it\n");
+                    "2) Keep it\n");
         }
         else
             printf("  Auto-cleaning dirty flag\n");

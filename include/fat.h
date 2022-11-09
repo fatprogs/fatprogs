@@ -26,6 +26,7 @@ void clear_bitmap_reclaim(DOS_FS *fs, uint32_t cluster);
 void set_bitmap_occupied(DOS_FS *fs, uint32_t cluster);
 void clear_bitmap_occupied(DOS_FS *fs, uint32_t cluster);
 
+void init_alloc_cluster(void);
 void inc_alloc_cluster(void);
 void dec_alloc_cluster(void);
 

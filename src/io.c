@@ -218,12 +218,9 @@ void print_changes(void)
     CHANGE *walk;
     CHANGE *next = NULL;
     int i;
+    int print_flag = 0;
 
     printf("Wrong data in CHANGES list : ");
-    if (changes == NULL)
-        printf("None");
-    else
-        printf("\n");
 
     for (i = 0, walk = changes; walk; walk = walk->next, i++) {
         next = walk->next;
@@ -232,10 +229,14 @@ void print_changes(void)
         }
 
         if ((walk->pos >= next->pos) || (walk->pos + walk->size > next->pos)) {
-            printf("%5d : pos %8ld, size %8d\n", i, walk->pos, walk->size);
-            printf("%5d : pos %8ld, size %8d\n", i + 1, next->pos, next->size);
+            print_flag = 1;
+            printf("\n%5d : pos %8ld, size %8d", i, walk->pos, walk->size);
+            printf("\n%5d : pos %8ld, size %8d\n", i + 1, next->pos, next->size);
         }
     }
+
+    if (!print_flag)
+        printf("None\n");
 }
 
 void fs_write(loff_t pos, int size, void *data)
