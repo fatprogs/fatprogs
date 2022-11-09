@@ -25,7 +25,8 @@
 typedef enum dflag {
     DUMP_RESERVED,  /* Dump reserved sectors only */
     DUMP_FAT,       /* Dump reserved sectors and FATs only */
-    DUMP_ALL,       /* Dump ALL */
+    DUMP_META,      /* Dump reserved sectors and FAT and Meta only */
+    DUMP_ALL,       /* Dump ALL (include data) */
 } dflag_t;
 
 int fd_in;
@@ -33,7 +34,7 @@ int fd_out;
 int verbose = 0;
 int fat_num = 0;
 int atari_format = 0;
-dflag_t dump_flag = DUMP_ALL;
+dflag_t dump_flag = DUMP_META;
 unsigned short reserved_cnt;
 unsigned short sector_size;
 unsigned short sec_per_fat;
@@ -239,7 +240,9 @@ static void traverse_tree(DOS_FS *fs, uint32_t clus_num, int attr)
         __traverse_dir(fs, clus_num);
     } else if (IS_FILE(attr)) {
         /* file */
-        __traverse_file(fs, clus_num);
+        if (dump_flag == DUMP_ALL) {
+            __traverse_file(fs, clus_num);
+        }
     }
 }
 
@@ -425,7 +428,7 @@ static int dump__read_boot(DOS_FS *fs, struct boot_sector *b)
     off_t data_size;
     off_t last_offset;
     off_t device_size;
-    int ret = 0;
+    off_t ret = 0;
     int change_flag = 0;
 
     /* read device size */
@@ -479,7 +482,7 @@ retry:
     total_sectors = sectors ? sectors : CF_LE_L(b->total_sect);
 
     /* Can't access last odd sector anyway, so round down */
-    last_offset = (off_t)((total_sectors & ~1) - 1) * (off_t)sector_size;
+    last_offset = (off_t)((total_sectors & ~0x01) - 1) * (off_t)sector_size;
     ret = lseek(fd_in, last_offset, SEEK_SET);
     if (ret != last_offset) {
         /* Can't dump all blocks, just dump reserved and FAT only */
@@ -620,6 +623,9 @@ int main(int argc, char *argv[])
             case 'v':
                 verbose = 1;
                 printf("dosfsdump " VERSION " (" VERSION_DATE ")\n");
+                break;
+            case 'd':
+                dump_flag = DUMP_ALL;
                 break;
             case 'h':
                 usage(argv[0]);
