@@ -718,27 +718,6 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
             break;
         }
 
-        /* check duplicatedly?
-         * is it better that check outside of 'for' loop?
-         * and already same check routine is there except calling
-         * truncate_file(). */
-        if (IS_FILE(file->dir_ent.attr) && CF_LE_L(file->dir_ent.size) <=
-                (unsigned long long)clusters * fs->cluster_size) {
-            printf("%s\n  File size is %u bytes, cluster chain length is > %llu "
-                    "bytes.\n  Truncating file to %u bytes.\n",
-                    path_name(file),
-                    CF_LE_L(file->dir_ent.size),
-                    (unsigned long long)clusters * fs->cluster_size,
-                    CF_LE_L(file->dir_ent.size));
-            /* Do not truncate file, so data can be reclaimed as possible.*/
-            if (prev)
-                set_fat(fs, prev, -1);
-            else
-                MODIFY_START(file, 0, fs);
-
-            break;
-        }
-
         /* check shared clusters */
         if (test_bit(curr, fs->real_bitmap)) {
             /* already bit of curr is set in fs->real_bitmap */
@@ -845,8 +824,20 @@ truncate_second:
     if (IS_FILE(file->dir_ent.attr) && CF_LE_L(file->dir_ent.size) >
             (unsigned long long)clusters * fs->cluster_size) {
 
-        printf("%s\n  File size is %u bytes, cluster chain length is %llu bytes."
-                "\n  Truncating file to %llu bytes.\n",
+        printf("%s\n  File size is %u bytes, cluster chain length is %llu "
+                "bytes.\n  Modifying file size to %llu bytes.\n",
+                path_name(file), CF_LE_L(file->dir_ent.size),
+                (unsigned long long)clusters * fs->cluster_size,
+                (unsigned long long)clusters * fs->cluster_size);
+        MODIFY(file, size,
+                CT_LE_L((unsigned long long)clusters * fs->cluster_size));
+    }
+
+    if (IS_FILE(file->dir_ent.attr) && clusters &&
+            CF_LE_L(file->dir_ent.size) <=
+            (unsigned long long)(clusters - 1) * fs->cluster_size) {
+        printf("%s\n  File size is %u bytes, cluster chain length is %llu "
+                "bytes.\n  Modifying file size to %llu bytes.\n",
                 path_name(file), CF_LE_L(file->dir_ent.size),
                 (unsigned long long)clusters * fs->cluster_size,
                 (unsigned long long)clusters * fs->cluster_size);
