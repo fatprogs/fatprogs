@@ -1190,6 +1190,8 @@ static void setup_tables(void)
             die("unable to allocate space for FAT image in memory");
 
         memset(fat, 0, sec_per_fat * sector_size);
+
+        fat[0] = (unsigned char)bs.media;  /* Put media type in first byte! */
     }
     else {
         int i, j;
@@ -1205,9 +1207,9 @@ static void setup_tables(void)
                 writebuf(fat, sector_size, "FAT");
             }
         }
+        mark_FAT_cluster(0, 0x00ffffff | bs.media << 24);	/* Initial fat entries */
     }
 
-    mark_FAT_cluster(0, 0x00ffffff | bs.media << 24);	/* Initial fat entries */
     mark_FAT_cluster(1, 0xffffffff);
     if (fat_bits == 32) {
         /* Mark cluster 2 as EOF (used for root dir) */
@@ -1313,6 +1315,8 @@ static void write_tables(void)
         seekto(reserved_sectors * sector_size, "first FAT");
         for (x = 1; x <= nr_fats; x++)
             writebuf(fat, sec_per_fat * sector_size, "FAT");
+    } else {
+        seekto(start_data_sector * sector_size, "root directory");
     }
 
     /* Write the root directory directly after the last FAT. This is the root
