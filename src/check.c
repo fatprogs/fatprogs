@@ -1125,6 +1125,7 @@ static void add_file(DOS_FS *fs, DOS_FILE ***chain, DOS_FILE *parent,
     DOS_FILE *new;
     DIR_ENT de;
     FD_TYPE type;
+    int rename_flag = 0;
 
     if (offset)
         fs_read(offset, sizeof(DIR_ENT), &de);
@@ -1149,6 +1150,26 @@ static void add_file(DOS_FS *fs, DOS_FILE ***chain, DOS_FILE *parent,
                 parent->lfn ? "/" : "",
                 dot ? "." : "..");
 
+#if 1
+        if (interactive)
+            printf("1: Delete.\n"
+                    "2: Auto-rename.\n"
+                    "3: Leave it.\n");
+        else
+            printf("  Auto-deleting.\n");
+
+        switch (interactive ? get_key("123", "?") : '1') {
+            case '1':
+                de.name[0] = DELETED_FLAG;
+                fs_write(offset, sizeof(DIR_ENT), &de);
+                break;
+            case '2':
+                rename_flag = 1;
+                break;
+            case '3':
+                break;
+        }
+#else
         if (interactive)
             printf("1: Delete.\n"
                     "2: Leave it.\n");
@@ -1161,6 +1182,7 @@ static void add_file(DOS_FS *fs, DOS_FILE ***chain, DOS_FILE *parent,
         }
 
         return;
+#endif
     }
 
     if ((type = file_type(cp, (char *)de.name)) != fdt_none) {
@@ -1204,6 +1226,12 @@ static void add_file(DOS_FS *fs, DOS_FILE ***chain, DOS_FILE *parent,
             strncmp((char *)de.name, MSDOS_DOT, MSDOS_NAME) != 0 &&
             strncmp((char *)de.name, MSDOS_DOTDOT, MSDOS_NAME) != 0)
         ++n_files;
+
+    if (rename_flag) {
+        auto_rename(fs, new);
+        printf("  Renamed to %s\n",
+                file_name(new->dir_ent.name));
+    }
 
     check_file_chain(fs, new, test);
 }
@@ -1851,7 +1879,7 @@ int check_volume_label(DOS_FS *fs)
             case '2':
                 walk = label_head->file;
                 memcpy(label_temp, walk->dir_ent.name, LEN_VOLUME_LABEL);
-                printf("  Select first label (%s)\n", label_temp);
+                printf("  Select first label ('%s')\n", label_temp);
 
                 prev = &label_head;
                 for (lwalk = label_head->next; lwalk;) {
@@ -2181,7 +2209,7 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
             printf("Checking file %s\n", path_name(dot_file));
 
         if (!(de->attr & ATTR_DIR)) {
-            printf("%s\n  Fixing %s entry's('%s') invalid attribute.\n",
+            printf("%s\n  Fixing invalid attribute of %s entry('%s').\n",
                     path_name(dot_file->parent),
                     (dots == DOT_ENTRY) ? "first" : "second",
                     (dots == DOT_ENTRY) ? "." : "..");
@@ -2189,7 +2217,7 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
         }
 
         if (start_clus != FSTART(dot_file, fs)) {
-            printf("%s\n  Fixing %s entry's('%s') invalid start cluster.\n",
+            printf("%s\n  Fixing invalid start cluster of %s entry('%s').\n",
                     path_name(dot_file->parent),
                     (dots == DOT_ENTRY) ? "first" : "second",
                     (dots == DOT_ENTRY) ? "." : "..");
@@ -2199,12 +2227,29 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
         if (memcmp(&p_de->ctime_ms, &de->ctime_ms, 7) ||
                     memcmp(&p_de->time, &de->time, 4)) {
             /* copy ctime_ms, ctime, cdate, adate, time, date from self */
+#if 1
+            de->ctime_ms = p_de->ctime_ms;
+            de->ctime = p_de->ctime;
+            de->cdate = p_de->cdate;
+            de->adate = p_de->adate;
+            de->time = p_de->time;
+            de->date = p_de->date;
+            de->size = p_de->size;
+            fs_write(dot_file->offset + offsetof(DIR_ENT, ctime_ms),
+                    sizeof(de->ctime_ms) + sizeof(de->ctime) +
+                    sizeof(de->cdate) + sizeof(de->adate),
+                    &de->ctime_ms);
+            fs_write(dot_file->offset + offsetof(DIR_ENT, time),
+                    sizeof(de->time) + sizeof(de->date), &de->time);
+
+#else
             MODIFY(dot_file, ctime_ms, p_de->ctime_ms);
             MODIFY(dot_file, ctime, p_de->ctime);
             MODIFY(dot_file, cdate, p_de->cdate);
             MODIFY(dot_file, adate, p_de->adate);
             MODIFY(dot_file, time, p_de->time);
             MODIFY(dot_file, date, p_de->date);
+#endif
         }
         return 0;
     }
@@ -2214,9 +2259,9 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
      * 2. other entry is located in first/second entry */
     if (IS_FREE(de->name)) {
         printf("%s\n  %s entry is expected as '%s',"
-                " but is free or deleted.\n",
+                " but it was freed or deleted.\n",
                 path_name(dot_file->parent),
-                (dots == DOT_ENTRY) ? "first" : "second",
+                (dots == DOT_ENTRY) ? "First" : "Second",
                 (dots == DOT_ENTRY) ? "." : "..");
         if (interactive)
             printf("1) Create %s entry\n"
@@ -2249,12 +2294,14 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
 
                 memcpy(de->name, entry_name, LEN_FILE_NAME);
                 de->attr = ATTR_DIR;
+                de->lcase = p_de->lcase;
                 de->ctime_ms = p_de->ctime_ms;
                 de->ctime = p_de->ctime;
                 de->cdate = p_de->cdate;
                 de->adate = p_de->adate;
                 de->time = p_de->time;
                 de->date = p_de->date;
+                de->size = 0;
                 fs_write(dot_file->offset, sizeof(dot_file->dir_ent), de);
                 MODIFY_START(dot_file, start_clus, fs);
                 break;
@@ -2270,7 +2317,7 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
      * allocate new cluster for first/second entry,
      * write ".", ".." entry to allocated new cluster. */
 
-    printf("%s\n  %s entry is expected as '%s', but is '%s'.\n",
+    printf("%s\n  %s entry is expected as '%s', but it is '%s'.\n",
             path_name(dot_file),
             (dots == DOT_ENTRY) ? "First" : "Second",
             (dots == DOT_ENTRY) ? "." : "..",
@@ -2279,11 +2326,13 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
     if (interactive) {
         printf("1) Drop '%s' entry\n"
                 "2) Drop parent entry\n"
-                "3) Add dots entries to first/second\n",
-                file_name(de->name));
+                "3) Add dots entry to %s slot\n",
+                file_name(de->name), (dots == DOT_ENTRY) ? "first" : "second");
     }
     else
-        printf("  Auto-adding dots entries to first/second.\n");
+        printf("  Auto-adding %s entry to %s slot.\n",
+                (dots == DOT_ENTRY) ? "dot('.')" : "dotdot('..')",
+                (dots == DOT_ENTRY) ? "first" : "second");
 
     switch (interactive ? get_key("123", "?") : '3') {
         case '1':
@@ -2293,12 +2342,14 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
 
             memcpy(de->name, entry_name, LEN_FILE_NAME);
             de->attr = ATTR_DIR;
+            de->lcase = p_de->lcase;
             de->ctime_ms = p_de->ctime_ms;
             de->ctime = p_de->ctime;
             de->cdate = p_de->cdate;
             de->adate = p_de->adate;
             de->time = p_de->time;
             de->date = p_de->date;
+            de->size = 0;
             fs_write(dot_file->offset, sizeof(DIR_ENT), de);
             MODIFY_START(dot_file, start_clus, fs);
             break;
