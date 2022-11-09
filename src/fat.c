@@ -232,8 +232,8 @@ static void read_fat_cache(DOS_FS *fs, uint32_t cluster)
     }
 
     /* fat cache doesn't hit */
-    if (!(cluster >= fs->fat_cache.start &&
-            cluster < fs->fat_cache.start + fs->fat_cache.cnt)) {
+//    if (!(cluster >= fs->fat_cache.start &&
+//            cluster < fs->fat_cache.start + fs->fat_cache.cnt)) {
         mmap_offset = fs->fat_start + cluster * fs->fat_bits / BITS_PER_BYTE;
         aligned_offset = mmap_offset & ~(sysconf(_SC_PAGE_SIZE) - 1);
 
@@ -274,7 +274,7 @@ static void read_fat_cache(DOS_FS *fs, uint32_t cluster)
         }
 
         fs->fat_cache.addr = fs_mmap(NULL, aligned_offset, FAT_CACHE_SIZE);
-    }
+//    }
 }
 
 void get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value)
@@ -311,7 +311,10 @@ void get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value)
 
             clus_size = 4;
 #if 1
-            read_fat_cache(fs, cluster);
+            if (!(cluster >= fs->fat_cache.start &&
+                        cluster < fs->fat_cache.start + fs->fat_cache.cnt)) {
+                read_fat_cache(fs, cluster);
+            }
 
             /* offset in cache */
             offset = ((cluster - fs->fat_cache.start) * clus_size) % FAT_CACHE_SIZE;
@@ -490,6 +493,10 @@ void fix_bad(DOS_FS *fs)
 
     for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
         if (test_bit(i, fs->reclaim_bitmap)) {
+            /* TODO: check 64bit at once */
+            if (fs->real_bitmap[i / BITS_PER_LONG] == 0xffffffff) {
+                i = ((i / BITS_PER_LONG) * BITS_PER_LONG) + BITS_PER_LONG - 1;
+            }
             continue;
         }
 
@@ -521,6 +528,10 @@ void reclaim_free(DOS_FS *fs)
     /* Do not set bitmap in reclaim routine */
     for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
         if (!test_bit(i, fs->real_bitmap)) {
+            /* TODO: check 64bit at once */
+            if (fs->real_bitmap[i / BITS_PER_LONG] == 0) {
+                i = ((i / BITS_PER_LONG) * BITS_PER_LONG) + BITS_PER_LONG - 1;
+            }
             continue;
         }
 
@@ -548,6 +559,10 @@ static void find_start_clusters(DOS_FS *fs)
 
     for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
         if (!test_bit(i, fs->real_bitmap)) {
+            /* TODO: check 64bit at once */
+            if (fs->real_bitmap[i / BITS_PER_LONG] == 0) {
+                i = ((i / BITS_PER_LONG) * BITS_PER_LONG) + BITS_PER_LONG - 1;
+            }
             continue;
         }
 
@@ -595,10 +610,17 @@ void reclaim_file(DOS_FS *fs)
      * After function called, remained bitmap represent orphan clusters */
     set_exclusive_bitmap(fs);
 
+    /* TODO: below 'for' loop can be moved into after find_start_clusters() 'for' loop */
     /* check if orphan cluster chain has normal cluster.
      * if then, set EOF to orphan cluster's value. */
     for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
         uint32_t value;
+
+        /* TODO: check 64bit at once */
+        if (i % BITS_PER_LONG == 0 && fs->real_bitmap[i / BITS_PER_LONG] == 0) {
+            i = ((i / BITS_PER_LONG) * BITS_PER_LONG) + BITS_PER_LONG - 1;
+            continue;
+        }
 
         /* if bit is set, that cluster is orphan cluster */
         if (!test_bit(i, fs->real_bitmap)) {
@@ -622,6 +644,12 @@ void reclaim_file(DOS_FS *fs)
 
     files = reclaimed = 0;
     for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
+        /* TODO: can check 64bit at once? */
+        if (fs->real_bitmap[i / BITS_PER_LONG] == 0) {
+            i = ((i / BITS_PER_LONG) * BITS_PER_LONG) + BITS_PER_LONG - 1;
+            continue;
+        }
+
         /* check real_bitmap, and if it set,
          * it(i) is orphaned cluster's start cluster */
         if (test_bit(i, fs->real_bitmap)) {

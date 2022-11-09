@@ -409,7 +409,7 @@ void *fs_mmap(void *addr, off_t offset, int length)
 {
     void *ret_addr = NULL;
 
-    ret_addr = mmap(addr, length, PROT_READ, MAP_SHARED, fd, offset);
+    ret_addr = mmap(addr, length, PROT_READ, MAP_SHARED | MAP_POPULATE, fd, offset);
     if (ret_addr < 0) {
         pdie("mmap %ld offset failed", offset);
     }

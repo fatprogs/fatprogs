@@ -717,7 +717,7 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
 
     clusters = prev = 0;
     /* TODO: calling once instead of calling next_cluster() / get_fat() */
-#if 1
+#if 0
     for (curr = FSTART(file, fs) ? FSTART(file, fs) : -1;
             curr != -1; curr = next_cluster(fs, curr)) {
         get_fat(fs, curr, &next_clus);
@@ -1079,8 +1079,13 @@ static void check_file_chain(DOS_FS *fs, DOS_FILE *file, int read_test)
             break;
         }
 
+#if 1
+        if (FAT_IS_BAD(fs, next))
+            break;
+#else
         if (bad_cluster(fs, curr))
             break;
+#endif
 
         if (!read_test) {
             /* keep cluster curr */
@@ -2110,6 +2115,7 @@ static int add_dot_entries(DOS_FS *fs, DOS_FILE *parent, int dots)
     de = &dot_file.dir_ent;
     p_de = &parent->dir_ent;
 
+    /* TODO: use free cluster hint field(info_sector's next_cluster) */
     /* find free cluster */
     for (new_clus = FAT_START_ENT + 1; new_clus != FAT_START_ENT; new_clus++) {
         if (new_clus >= fs->clusters + FAT_START_ENT)
