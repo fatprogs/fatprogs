@@ -25,7 +25,6 @@
 #include "check.h"
 
 int interactive = 0, list = 0, test = 0, verbose = 0, write_immed = 0;
-int check_dirty = 0;
 int check_dirty_only = 0;
 int atari_format = 0;
 int remain_dirty = 0;
@@ -60,6 +59,7 @@ int main(int argc, char **argv)
     DOS_FS fs;
     int rw, salvage_files, verify, c;
     int ret = 0;
+    int dirty_flag = 0;
     uint32_t free_clusters;
 
     salvage_files = verify = 0;
@@ -79,7 +79,6 @@ int main(int argc, char **argv)
                 salvage_files = 1;
                 break;
             case 'C':
-                check_dirty = 1;
                 check_dirty_only = 1;
                 interactive = 0;
                 break;
@@ -137,16 +136,18 @@ int main(int argc, char **argv)
 
     do {
         n_files = 0;
+        dirty_flag = 0;
         read_fat(&fs);
 
-        if (check_dirty &&
-                ((fs.fat_bits == 32) || (fs.fat_bits == 16))) {
-            if (check_dirty_flag(&fs)) {
-                if (check_dirty_only) {
-                    if (verify)
-                        printf("  Just check filesystem dirty flag, exit!\n");
-                    exit(4);
-                }
+        if ((fs.fat_bits == 32) || (fs.fat_bits == 16)) {
+            dirty_flag = check_dirty_flag(&fs);
+        }
+
+        if (check_dirty_only) {
+            if (dirty_flag) {
+                if (verify)
+                    printf("  Just check filesystem dirty flag, exit!\n");
+                exit(EXIT_ERRORS_LEFT);
             }
             else {
                 if (verify)

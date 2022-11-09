@@ -2400,9 +2400,11 @@ int check_dirty_flag(DOS_FS *fs)
     /* read second value of FAT that has dirty flag */
     get_fat(fs, 1, &value);
     if ((fs->fat_state & FAT_STATE_DIRTY) || !(value & dirty_mask)) {
-        printf("FAT dirty flag is set.\n"
+        printf("FAT dirty flag is set. Boot(%s):FAT(%s)\n"
                 "  Filesystem might be shudowned unexpectedly,\n"
-                "  So filesystem may be corrupted.\n\n");
+                "  So filesystem may be corrupted.\n\n",
+                (fs->fat_state & FAT_STATE_DIRTY) ? "dirty" : "clean",
+                (value & dirty_mask) == dirty_mask ? "clean" : "dirty");
         return -1;
     }
     printf("FAT dirty flag is clean.\n");
