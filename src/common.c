@@ -34,7 +34,7 @@ void die(char *msg,...)
     vfprintf(stderr, msg, args);
     va_end(args);
     fprintf(stderr, "\n");
-    exit(0x08);
+    exit(EXIT_OPERATION_ERROR);
 }
 
 void pdie(char *msg,...)
@@ -45,7 +45,7 @@ void pdie(char *msg,...)
     vfprintf(stderr, msg, args);
     va_end(args);
     fprintf(stderr,":%s\n", strerror(errno));
-    exit(0x08);
+    exit(EXIT_SYSCALL_ERROR);
 }
 
 void *alloc_mem(int size)
@@ -123,14 +123,14 @@ char get_key(char *valid, char *prompt)
 
         while (ch = getchar(), ch == ' ' || ch == '\t');
         if (ch == EOF)
-            exit(0x08);
+            exit(EXIT_OPERATION_ERROR);
 
         if (!strchr(valid, okay = ch))
             okay = 0;
 
         while (ch = getchar(), ch != '\n' && ch != EOF);
         if (ch == EOF)
-            exit(0x08);
+            exit(EXIT_OPERATION_ERROR);
 
         if (okay)
             return okay;

@@ -237,6 +237,7 @@ void fs_write_immed(loff_t pos, int size, void *data)
 {
     int did;
 
+    did_change = 1;
     if ((did = pwrite(fd, data, size, pos)) == size)
         return;
 
@@ -254,7 +255,6 @@ void fs_write(loff_t pos, int size, void *data)
     CHANGE *merge;
 
     if (write_immed) {
-        did_change = 1;
         fs_write_immed(pos, size, data);
         return;
     }

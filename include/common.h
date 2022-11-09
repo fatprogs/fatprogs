@@ -11,7 +11,7 @@
 #define _COMMON_H
 
 #ifndef offsetof
-#define offsetof(t, e)	((off_t)&(((t *)0)->e))
+#define offsetof(t, e)	((size_t)&(((t *)0)->e))
 #endif
 
 /* don't divide by zero */
@@ -34,6 +34,17 @@
 /* Constant definitions */
 #define TRUE 1			/* Boolean constants */
 #define FALSE 0
+
+typedef enum {
+    EXIT_NO_ERRORS      = 0x00,
+    EXIT_CORRECTED      = 0x01,
+    EXIT_NOT_SUPPORT    = 0x02,
+    EXIT_ERRORS_LEFT    = 0x04,
+    EXIT_OPERATION_ERROR = 0x08,
+    EXIT_SYNTAX_ERROR   = 0x10,
+    EXIT_USER_CANCEL    = 0x20,
+    EXIT_SYSCALL_ERROR  = 0x40,
+} exit_type_t;
 
 /* Displays a prinf-style message and terminates the program. */
 void die(char *msg, ...) __attribute((noreturn));

@@ -29,6 +29,8 @@ static int add_dot_entries(DOS_FS *fs, DOS_FILE *parent, int dots);
 static int check_file_owner(DOS_FS *fs, DOS_FILE *walk, uint32_t cluster,
         int cnt);
 static DOS_FILE *find_owner(DOS_FS *fs, uint32_t cluster);
+static void add_file(DOS_FS *fs, DOS_FILE ***chain, DOS_FILE *parent,
+        loff_t offset, FDSC **cp);
 
 static DOS_FILE *root;
 
@@ -74,118 +76,316 @@ static label_t *label_last;
         }									\
     } while(0)
 
-loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
+
+#define PREFIX_FOUND    "FOUND   "
+#define MAX_FOUND_NAME  "FOUND   999"
+#define MIN_FOUND_NAME  "FOUND   000"
+
+/* only for FAT32 */
+loff_t __alloc_entry(DOS_FS *fs, uint32_t dir_start, int type, uint32_t *new_clus)
+{
+    loff_t offset;
+    uint32_t clus_num;
+
+    DIR_ENT de;
+    int i = 0, got = 0;
+    uint32_t prev = 0;
+
+    clus_num = dir_start;
+
+    offset = cluster_start(fs, clus_num);
+
+    /* find empty slot */
+    while (clus_num > 0 && clus_num != -1) {
+        fs_read(offset, sizeof(DIR_ENT), &de);
+        if (IS_FREE(de.name) && !IS_LFN_ENT(de.attr)) {
+            got = 1;
+            break;
+        }
+
+        i += sizeof(DIR_ENT);
+        offset += sizeof(DIR_ENT);
+        if ((i % fs->cluster_size) == 0) {
+            prev = clus_num;
+            if ((clus_num = next_cluster(fs, clus_num)) == 0 || clus_num == -1)
+                break;
+            offset = cluster_start(fs, clus_num);
+            i = 0;
+        }
+    }
+
+    /* allocate cluster for parent directory entry */
+    if (!got) {
+        /* no free slot, need to extend root dir: alloc next free cluster
+         * after previous one */
+        if (!prev)
+            die("Root directory has no cluster allocated!");
+
+        /* find free cluster */
+        for (clus_num = prev + 1; clus_num != prev; clus_num++) {
+            uint32_t value;
+
+            if (clus_num >= max_clus_num)
+                clus_num = FAT_START_ENT;
+
+            get_fat(fs, clus_num, &value);
+            if (!value)
+                break;
+        }
+
+        if (clus_num == prev)
+            die("Root directory full and no free cluster");
+
+        /* Don't set bitmap, don't increase alloc_clusters for prev. */
+        /* Don't set bitmap, because this function only called
+         * in reclaim routine. Just increase alloc_clusters for clus_num. */
+        set_fat(fs, prev, clus_num);
+        set_fat(fs, clus_num, -1);
+        inc_alloc_cluster();
+
+        /* clear new cluster */
+        memset(&de, 0, sizeof(de));
+        offset = cluster_start(fs, clus_num);
+
+        /* TODO: ??? why it use for loop to clear cluster */
+        for (i = 0; i < fs->cluster_size; i += sizeof(DIR_ENT))
+            fs_write(offset + i, sizeof(de), &de);
+    }
+
+    /* allocate new cluster for new directory entry */
+    if (type == ATTR_DIR && new_clus) {
+        loff_t dir_offset;
+        uint32_t new_dir;
+        uint32_t value;
+        int size_de = sizeof(DIR_ENT);
+
+        new_dir = fs->next_cluster;
+        for (new_dir = new_dir + 1; new_dir != fs->next_cluster; new_dir++) {
+            if (new_dir >= max_clus_num)
+                new_dir = FAT_START_ENT;
+
+            get_fat(fs, new_dir, &value);
+            if (!value)
+                break;
+        }
+
+        if (new_dir == fs->next_cluster)
+            die("volume has no free cluster");
+
+        /* Don't set bitmap, because this function only called
+         * in reclaim routine. Just increase alloc_clusters for new_dir. */
+        set_fat(fs, new_dir, -1);
+        inc_alloc_cluster();
+
+        /* clear new cluster */
+        memset(&de, 0, size_de);
+        dir_offset = cluster_start(fs, new_dir);
+
+        *new_clus = new_dir;
+
+        /* set "." entry */
+        memset(&de, 0, size_de);
+        memcpy(de.name, MSDOS_DOT, LEN_FILE_NAME);
+        de.attr = ATTR_DIR;
+        de.start = CT_LE_W(new_dir & 0xffff);
+        de.starthi = CT_LE_W(new_dir >> 16);
+        fs_write(dir_offset, size_de, &de);
+
+        /* set ".." entry */
+        memset(&de, 0, size_de);
+        memcpy(de.name, MSDOS_DOTDOT, LEN_FILE_NAME);
+        de.attr = ATTR_DIR;
+        if (dir_start != fs->root_cluster) {
+            de.start = CT_LE_W(dir_start & 0xffff);
+            de.starthi = CT_LE_W(dir_start >> 16);
+        }
+        fs_write(dir_offset + size_de, size_de, &de);
+
+        memset(&de, 0, size_de);
+        /* TODO: ??? why it use for loop to clear cluster */
+        for (i = size_de * 2; i < fs->cluster_size; i += size_de)
+            fs_write(dir_offset + i, size_de, &de);
+
+    }
+
+    return offset;
+}
+
+/* only for FAT32 */
+DOS_FILE *check_found_dir(DOS_FS *fs, int *post_num)
+{
+    DOS_FILE *walk = NULL;
+    DOS_FILE *found = NULL;
+    DIR_ENT *de = {0, };
+    DIR_ENT *found_de;
+
+    for (walk = root->first; walk; walk = walk->next) {
+        de = &walk->dir_ent;
+
+        if (!strncmp((char *)de->name, PREFIX_FOUND, LEN_FILE_NAME - 3)) {
+            if (!IS_DIR(de->attr))
+                continue;
+
+            if (strncmp((char *)de->name, MIN_FOUND_NAME, LEN_FILE_NAME) < 0)
+                continue;
+
+            if (strncmp((char *)de->name, MAX_FOUND_NAME, LEN_FILE_NAME) > 0)
+                continue;
+
+            if (!found) {
+                found = walk;
+                found_de = &found->dir_ent;
+                continue;
+            }
+
+            if (strncmp((char *)de->name, (char *)found_de->name, LEN_FILE_NAME) <= 0)
+                continue;
+
+            found = walk;
+            found_de = &found->dir_ent;
+        }
+    }
+
+    if (found) {
+        *post_num = atoi((const char *)(found->dir_ent.name + LEN_FILE_BASE));
+    }
+
+    return found;
+}
+
+/* allocate FOUND.XXX entry in root directory.
+ * @clus_num : start cluster to find empty slot
+ * @force_create : if 0, just find FOUND.XXX directory and return,
+ *                 if 1, find FOUND.XXX and make FOUND.(XXX + 1)
+ */
+uint32_t alloc_found_entry(DOS_FS *fs, int force_create)
+{
+    static int post_num = 0;
+    DOS_FILE *dir = NULL;
+    DOS_FILE **chain;
+    loff_t offset = 0;
+    uint32_t new;
+    char dir_name[LEN_FILE_NAME + 1] = {0, };
+
+    /* find directory FOUND.XXX */
+    dir = check_found_dir(fs, &post_num);
+
+    /* if FOUND.XXX does not exist or force_create flag set,
+     * create FOUND.XXX */
+    if (!dir || force_create) {
+        DIR_ENT de = {0, };
+        DOS_FILE *walk = NULL;
+
+        /* if there is no FOUND.XXX, make 'FOUND.000' */
+        offset = __alloc_entry(fs, FSTART(root, fs), ATTR_DIR, &new);
+
+        if (!dir)
+            post_num = 0;
+
+        if (force_create)
+            post_num++;
+
+        if (post_num > MAX_FOUND_DIR)
+            die("Unable to create unique name");
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+        snprintf(dir_name, LEN_FILE_NAME + 1, "%s%03d", PREFIX_FOUND, post_num);
+#pragma GCC diagnostic pop
+        memcpy(de.name, dir_name, LEN_FILE_NAME);
+        de.attr = ATTR_DIR;
+        de.start = CT_LE_W(new & 0xffff);
+        de.starthi = CT_LE_W(new >> 16);
+        fs_write(offset, sizeof(de), &de);
+
+        /* add FOUND.XXX to DOS_FILE structure */
+        if (root->first) {
+            for (walk = root->first; walk->next; walk = walk->next);
+            chain = &walk->next;
+        }
+        else {
+            chain = &root->first;
+        }
+        add_file(fs, &chain, root, offset, NULL);
+    }
+    else {
+        new = FSTART(dir, fs);
+    }
+
+    return new;
+}
+
+
+/* only for FAT32 */
+loff_t alloc_reclaimed_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
 {
     static int curr_num = 0;
     loff_t offset;
+    loff_t offset2;
+    uint32_t clus_num = 0;
+    DIR_ENT d2;
 
-    if (fs->root_cluster) {
-        DIR_ENT d2;
-        int i = 0, got = 0;
-        uint32_t clu_num, prev = 0;
-        loff_t offset2;
+    clus_num = alloc_found_entry(fs, 0);
+    offset = __alloc_entry(fs, clus_num, 0, NULL);
 
-        /* TODO: use 'next_cluster' field of 'struct info_sector' */
-        clu_num = fs->root_cluster;
-        offset = cluster_start(fs, clu_num);
+    memset(de, 0, sizeof(DIR_ENT));
 
-        /* find empty slot */
-        while (clu_num > 0 && clu_num != -1) {
-            fs_read(offset, sizeof(DIR_ENT), &d2);
-            if (IS_FREE(d2.name) && !IS_LFN_ENT(d2.attr)) {
-                got = 1;
+    /* if pattern is NULL, then just allocate root entry
+     * and do not fill DIR_ENT structure */
+    if (!pattern)
+        return offset;
+
+    /* make entry using pattern */
+    while (1) {
+        char expanded[12];
+        int i;
+
+        sprintf(expanded, pattern, curr_num);
+        memcpy(de->name, expanded, LEN_FILE_NAME);
+        i = 0;
+        offset2 = cluster_start(fs, clus_num);
+
+        while (clus_num > 0 && clus_num != -1) {
+            fs_read(offset2, sizeof(DIR_ENT), &d2);
+
+            /* check duplicated entry */
+            if (offset2 != offset &&
+                    !strncmp((char *)d2.name, (char *)de->name, MSDOS_NAME))
                 break;
-            }
 
             i += sizeof(DIR_ENT);
-            offset += sizeof(DIR_ENT);
+            offset2 += sizeof(DIR_ENT);
+
             if ((i % fs->cluster_size) == 0) {
-                prev = clu_num;
-                if ((clu_num = next_cluster(fs, clu_num)) == 0 || clu_num == -1)
+                if ((clus_num = next_cluster(fs, clus_num)) == 0 ||
+                        clus_num == -1)
                     break;
-                offset = cluster_start(fs, clu_num);
+                offset2 = cluster_start(fs, clus_num);
+                i = 0;
             }
         }
 
-        if (!got) {
-            /* no free slot, need to extend root dir: alloc next free cluster
-             * after previous one */
-            if (!prev)
-                die("Root directory has no cluster allocated!");
+        if (clus_num == 0 || clus_num == -1)
+            break;
 
-            /* find free cluster */
-            for (clu_num = prev + 1; clu_num != prev; clu_num++) {
-                uint32_t value;
-
-                if (clu_num >= max_clus_num)
-                    clu_num = FAT_START_ENT;
-
-                get_fat(fs, clu_num, &value);
-                if (!value)
-                    break;
-            }
-
-            if (clu_num == prev)
-                die("Root directory full and no free cluster");
-
-            /* Don't set bitmap, don't increase alloc_clusters for prev. */
-            /* Don't set bitmap, because this function only called
-             * in reclaim routine. Just increase alloc_clusters for clu_num. */
-            set_fat(fs, prev, clu_num);
-            set_fat(fs, clu_num, -1);
-            inc_alloc_cluster();
-
-            /* clear new cluster */
-            memset(&d2, 0, sizeof(d2));
-            offset = cluster_start(fs, clu_num);
-
-            /* TODO: ??? why it use for loop to clear cluster */
-            for (i = 0; i < fs->cluster_size; i += sizeof(DIR_ENT))
-                fs_write(offset + i, sizeof(d2), &d2);
+        if (++curr_num > MAX_RECLAIMED_FILE) {
+            clus_num = alloc_found_entry(fs, 1);
+            offset = __alloc_entry(fs, clus_num, 0, NULL);
+            curr_num = 0;
         }
+    }
+    ++n_files;
+    return offset;
+}
 
+loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
+{
+    static int curr_num = 0;
+    loff_t offset = 0;
+
+    if (fs->root_cluster) {
+        offset = __alloc_entry(fs, fs->root_cluster, 0, NULL);
         memset(de, 0, sizeof(DIR_ENT));
-
-        /* if pattern is NULL, then just allocate root entry
-         * and do not fill DIR_ENT structure */
-        if (!pattern)
-            return offset;
-
-        /* make entry using pattern */
-        while (1) {
-            char expanded[12];
-
-            sprintf(expanded, pattern, curr_num);
-            memcpy(de->name, expanded, LEN_FILE_NAME);
-            clu_num = fs->root_cluster;
-            i = 0;
-            offset2 = cluster_start(fs, clu_num);
-
-            while (clu_num > 0 && clu_num != -1) {
-                fs_read(offset2, sizeof(DIR_ENT), &d2);
-
-                /* check duplicated entry */
-                if (offset2 != offset &&
-                        !strncmp((char *)d2.name, (char *)de->name, MSDOS_NAME))
-                    break;
-
-                i += sizeof(DIR_ENT);
-                offset2 += sizeof(DIR_ENT);
-
-                if ((i % fs->cluster_size) == 0) {
-                    if ((clu_num = next_cluster(fs, clu_num)) == 0 ||
-                            clu_num == -1)
-                        break;
-                    offset2 = cluster_start(fs, clu_num);
-                }
-            }
-
-            if (clu_num == 0 || clu_num == -1)
-                break;
-
-            if (++curr_num >= 10000)
-                die("Unable to create unique name");
-        }
     }
     else {
         DIR_ENT *root_ent;
@@ -230,7 +430,7 @@ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
             if (scan == fs->root_entries)
                 break;
 
-            if (++curr_num >= 10000)
+            if (++curr_num > MAX_RECLAIMED_FILE)
                 die("Unable to create unique name");
         }
         free_mem(root_ent);
@@ -420,7 +620,7 @@ static void truncate_file(DOS_FS *fs, DOS_FILE *file, uint32_t clusters)
 static int __find_lfn(DOS_FS *fs, DOS_FILE *parent, loff_t offset,
         DOS_FILE *file)
 {
-    DIR_ENT de;
+    DIR_ENT de = {0, };
 
     if (!offset) {
         return 0;
@@ -448,7 +648,7 @@ static int find_lfn(DOS_FS *fs, DOS_FILE *parent, DOS_FILE *file)
     uint32_t clus_num;
     unsigned int clus_size;
     loff_t offset;
-    DIR_ENT de;
+    DIR_ENT de = {0, };
 
     clus_num = FSTART(parent, fs);
     clus_size = fs->cluster_size;
@@ -621,6 +821,15 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
                            shared with same cluster */
     uint32_t next_clus;
 
+    if (!IS_DIR(file->dir_ent.attr) && !IS_FILE(file->dir_ent.attr) &&
+            !IS_VOLUME_LABEL(file->dir_ent.attr)) {
+        printf("%s\n  Invalid attribute."
+                " Can't determine entry as file or dir.(%d)\n"
+                "  Consider it to file.\n",
+                path_name(file), file->dir_ent.attr);
+        MODIFY(file, attr, 0);
+    }
+
     if (IS_DIR(file->dir_ent.attr)) {
         if (CF_LE_L(file->dir_ent.size)) {
             printf("%s\n  Directory has non-zero size. Fixing it.\n",
@@ -672,7 +881,7 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
         }
 
         if (FSTART(file, fs) == 0) {
-            printf ("%s\n  Start does point to root directory. Deleting dir.\n",
+            printf("%s\n  Start does point to root directory. Deleting dir.\n",
                     path_name(file));
             remove_lfn(fs, file);
             MODIFY(file, name[0], DELETED_FLAG);
@@ -923,6 +1132,7 @@ static int check_dir(DOS_FS *fs, DOS_FILE **root, int dots)
                 printf("  Almost files in parent(%s) are bad. Dropping parent.\n",
                         path_name(parent));
                 truncate_file(fs, parent, 0);
+                remove_lfn(fs, parent);
                 MODIFY(parent, name[0], DELETED_FLAG);
                 return 1;
             }
@@ -1210,18 +1420,17 @@ static void add_file(DOS_FS *fs, DOS_FILE ***chain, DOS_FILE *parent,
         if (!strncmp((char *)de.name, MSDOS_DOT, LEN_FILE_NAME)) {
             dot = 1;
         }
-        printf("Found invalid %s entry (%s%s%s)\n",
+        printf("Found invalid %s entry (%s/%s)\n",
                 dot ? "dot" : "dotdot", path_name(parent),
-                parent->lfn ? "/" : "",
                 dot ? "." : "..");
 
         if (interactive)
             printf("1) Delete.\n"
                     "2) Auto-rename.\n");
         else
-            printf("  Auto-renaming.\n");
+            printf("  Auto-deleting.\n");
 
-        switch (interactive ? get_key("12", "?") : '2') {
+        switch (interactive ? get_key("12", "?") : '1') {
             case '1':
                 de.name[0] = DELETED_FLAG;
                 fs_write(offset, sizeof(DIR_ENT), &de);
@@ -1345,14 +1554,6 @@ static int subdirs(DOS_FS *fs, DOS_FILE *parent, FDSC **cp)
         if (IS_DIR(walk->dir_ent.attr)) {
             if (scan_dir(fs, walk, file_cd(cp, (char *)(walk->dir_ent.name))))
                 return 1;
-        }
-        else if (!IS_FILE(walk->dir_ent.attr) &&
-                !IS_VOLUME_LABEL(walk->dir_ent.attr)) {
-            printf("%s\n  Invalid attribute."
-                    " Can't determine entry as file or dir.(%d)\n"
-                    "  Not auto-correcting this.\n",
-                    path_name(walk), walk->dir_ent.attr);
-            remain_dirty = 1;
         }
     }
     return 0;
@@ -1634,7 +1835,7 @@ void clean_label(label_t **head, label_t **last)
 
 void write_root_label(DOS_FS *fs, char *label, label_t **head, label_t **last)
 {
-    DIR_ENT de;
+    DIR_ENT de = {0, };
     off_t offset;
     struct tm *ctime;
     time_t current;
@@ -1654,7 +1855,6 @@ void write_root_label(DOS_FS *fs, char *label, label_t **head, label_t **last)
         DOS_FILE *prev = NULL;
 
         /* add_new_label() */
-
         offset = alloc_rootdir_entry(fs, &de, NULL);
         memcpy(de.name, label, LEN_VOLUME_LABEL);
         chain = &root->first;
@@ -2248,7 +2448,7 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
     }
     else {
         entry_name = MSDOS_DOTDOT;
-        start_clus = FSTART(parent->parent, fs);
+        start_clus = (parent->parent == root) ? 0 : FSTART(parent->parent, fs);
         offset = sizeof(DIR_ENT);
     }
 
@@ -2256,14 +2456,6 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
     dot_file->parent = parent;
     dot_file->offset = cluster_start(fs, clus_num) + offset;
     fs_read(dot_file->offset, sizeof(DIR_ENT), &dot_file->dir_ent);
-
-    if (dots == DOTDOT_ENTRY && parent->parent == root) {
-        /* parent of 'parent' is root directory */
-        if (start_clus != fs->root_cluster) {
-            die("root_cluster is different with root start cluster\n");
-        }
-        start_clus = 0;
-    }
 
     p_de = &parent->dir_ent;
     de = &dot_file->dir_ent;

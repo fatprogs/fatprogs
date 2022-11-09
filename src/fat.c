@@ -120,14 +120,14 @@ void read_fat(DOS_FS *fs)
 
             first_ok = (value & FAT_EXTD(fs)) == FAT_EXTD(fs);
             second_ok = (value2 & FAT_EXTD(fs)) == FAT_EXTD(fs);
-        }
 
-        if (second_fat && memcmp(first_fat, second_fat, read_size) != 0) {
-            if (!first_ok && !second_ok) {
+            if (second_fat && !first_ok && !second_ok) {
                 printf("Both FATs appear to be corrupt. Giving up.\n");
                 exit(EXIT_ERRORS_LEFT);
             }
+        }
 
+        if (second_fat && memcmp(first_fat, second_fat, read_size) != 0) {
             if (first_ok && !second_ok) {
                 if (flag == FAT_NONE)
                     printf("FATs differ - using first FAT.\n");
@@ -683,7 +683,11 @@ void reclaim_file(DOS_FS *fs)
             uint32_t prev;
 
             files++;
-            offset = alloc_rootdir_entry(fs, &de, "FSCK%04dREC");
+            if (fs->root_cluster)
+                offset = alloc_reclaimed_entry(fs, &de, "FSCK%04dREC");
+            else
+                offset = alloc_rootdir_entry(fs, &de, "FSCK%04dREC");
+
             de.start = CT_LE_W(i & 0xffff);
 
             if (fs->fat_bits == 32)

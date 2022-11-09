@@ -90,16 +90,6 @@ extern uint32_t max_clus_num;
 #define FAT_CACHE_BUF   (4096)      /* for mmap, aligned page size for FAT cache */
 #define FAT_CACHE_SIZE  (FAT_CACHE_BUF)
 
-typedef enum {
-    EXIT_NO_ERRORS      = 0x00,
-    EXIT_CORRECTED      = 0x01,
-    EXIT_NOT_SUPPORT    = 0x02,
-    EXIT_ERRORS_LEFT    = 0x04,
-    EXIT_OPERATION_ERROR = 0x08,
-    EXIT_SYNTAX_ERROR   = 0x10,
-    EXIT_USER_CANCEL    = 0x20,
-} exit_type_t;
-
 /* __attribute__ ((packed)) is used on all structures to make gcc ignore any
  * alignments */
 struct volume_info {
@@ -212,6 +202,7 @@ typedef struct {
     uint32_t clusters;  /* total number of data area clusters */
     loff_t fsinfo_start; /* 0 if not present */
     uint32_t free_clusters;
+    uint32_t next_cluster;
     loff_t backupboot_start; /* 0 if not present */
     unsigned int bitmap_size;
     unsigned long *bitmap;  /* for marked cluster on disk */
