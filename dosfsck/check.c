@@ -405,7 +405,7 @@ static int __find_lfn(DOS_FS *fs, DOS_FILE *parent, loff_t offset,
     }
 
     if (memcmp(de.name, file->dir_ent.name, 11) == 0 &&
-            offset == file->offset) {
+            offset == file->offset && lfn_exist()) {
         /* found */
         return 1;
     }
@@ -441,6 +441,7 @@ void remove_lfn(DOS_FS *fs, DOS_FILE *file)
 {
     DOS_FILE *parent;
 
+    lfn_reset();
     parent = file->parent;
     if (!parent) {
         printf("Can't remove lfn of root entry\n");

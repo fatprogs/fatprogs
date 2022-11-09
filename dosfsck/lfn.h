@@ -17,6 +17,7 @@ char *lfn_get(DIR_ENT *de);
 void lfn_check_orphaned(void);
 
 void lfn_remove(void);
+int lfn_exist(void);
 void scan_lfn(DIR_ENT *de, loff_t offset);
 
 #endif

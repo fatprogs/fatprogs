@@ -140,6 +140,7 @@ void lfn_reset(void)
 
     lfn_offsets = NULL;
     lfn_slot = -1;
+    lfn_parts = 0;
 }
 
 /* This function is only called with de->attr == VFAT_LN_ATTR. It stores part
@@ -545,6 +546,12 @@ void scan_lfn(DIR_ENT *de, loff_t dir_offset)
         lfn_offsets[lfn_parts++] = dir_offset;
     }
 }
+
+int lfn_exist(void)
+{
+    return lfn_parts ? 1 : 0;
+}
+
 /* Local Variables: */
 /* tab-width: 8     */
 /* End:             */
