@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier : GPL-2.0 */
+
 /*
 Filename:     mkdosfs.c
 Version:      0.3b (Yggdrasil)

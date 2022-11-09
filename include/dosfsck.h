@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier : GPL-2.0 */
+
 /* dosfsck.h  -  Common data structures and global variables */
 
 /* Written 1993 by Werner Almesberger */

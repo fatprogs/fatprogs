@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier : GPL-2.0 */
+
 /* fat.h  -  Read/write access to the FAT */
 
 /* Written 1993 by Werner Almesberger */

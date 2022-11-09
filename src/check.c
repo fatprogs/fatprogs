@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier : GPL-2.0 */
+
 /* check.c  -  Check and repair a PC/MS-DOS file system */
 
 /* Written 1993 by Werner Almesberger */

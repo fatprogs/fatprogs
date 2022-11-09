@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier : GPL-2.0 */
+
 /* io.c  -  Virtual disk input/output */
 
 /* Written 1993 by Werner Almesberger */

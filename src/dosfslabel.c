@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier : GPL-2.0 */
+
 /* dosfslabel.c  -  User interface */
 
 /* Copyright 2007 Red Hat, Inc.

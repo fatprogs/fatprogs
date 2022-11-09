@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier : GPL-2.0 */
+
 /* lfn.h  -  Functions for handling VFAT long filenames */
 
 /* Written 1998 by Roman Hodek */

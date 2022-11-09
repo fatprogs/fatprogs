@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier : GPL-2.0 */
+
 /* boot.h  -  Read and analyze ia PC/MS-DOS boot sector */
 
 /* Written 1993 by Werner Almesberger */

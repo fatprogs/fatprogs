@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier : GPL-2.0 */
+
 /* common.c  -  Common functions */
 
 /* Written 1993 by Werner Almesberger */

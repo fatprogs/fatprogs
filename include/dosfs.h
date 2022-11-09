@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier : GPL-2.0 */
+
 #ifndef _DOSFS_H_
 #define _DOSFS_H_
 
