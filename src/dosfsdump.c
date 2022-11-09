@@ -55,10 +55,7 @@ static inline void dump__get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value)
 
             clus_size = 2;
             offset = fs->fat_start + cluster * 3 / 2;
-            if (lseek(fd_in, offset, SEEK_SET) != offset)
-                pdie("Seek to %lld of input(%d,%s)", offset, __LINE__, __func__);
-
-            if (read(fd_in, data, clus_size) < 0)
+            if (pread(fd_in, data, clus_size, offset) < 0)
                 pdie("Read %d bytes at %lld(%d,%s)", clus_size, offset, __LINE__, __func__);
 
             *value = 0xfff & (cluster & 1 ? (data[0] >> 4) | (data[1] << 4) :
@@ -70,10 +67,7 @@ static inline void dump__get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value)
 
             clus_size = 2;
             offset = fs->fat_start + cluster * clus_size;
-            if (lseek(fd_in, offset, SEEK_SET) != offset)
-                pdie("Seek to %lld of input(%d,%s)", offset, __LINE__, __func__);
-
-            if (read(fd_in, (void *)&data, clus_size) < 0)
+            if (pread(fd_in, (void *)&data, clus_size, offset) < 0)
                 pdie("Read %d bytes at %lld(%d,%s)", clus_size, offset, __LINE__, __func__);
 
             *value = CF_LE_W(data);
@@ -84,10 +78,7 @@ static inline void dump__get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value)
 
             clus_size = 4;
             offset = fs->fat_start + cluster * clus_size;
-            if (lseek(fd_in, offset, SEEK_SET) != offset)
-                pdie("Seek to %lld of input(%d,%s)", offset, __LINE__, __func__);
-
-            if (read(fd_in, (void *)&data, clus_size) < 0)
+            if (pread(fd_in, (void *)&data, clus_size, offset) < 0)
                 pdie("Read %d bytes at %lld(%d,%s)", clus_size, offset, __LINE__, __func__);
 
             /* According to MS, the high 4 bits of a FAT32 entry are reserved and
@@ -124,19 +115,13 @@ static void dump_area(loff_t pos, int size, void *data)
 {
     int ret = 0;
 
-    if (lseek(fd_in, pos, SEEK_SET) != pos)
-        pdie("Seek to %lld of input(%d,%s)", pos, __LINE__, __func__);
-
-    if ((ret = read(fd_in, data, size)) < 0)
+    if ((ret = pread(fd_in, data, size, pos)) < 0)
         pdie("Read %d bytes at %lld", size, pos);
 
     if (ret != size)
         die("Read %d bytes instead of %d at %lld(%d,%s)", ret, size, pos, __LINE__, __func__);
 
-    if (lseek(fd_out, pos, SEEK_SET) != pos)
-        pdie("Seek to %lld of output", pos);
-
-    if ((ret = write(fd_out, data, size)) < 0)
+    if ((ret = pwrite(fd_out, data, size, pos)) < 0)
         pdie("Write %d bytes at %lld(%d,%s)", size, pos, __LINE__, __func__);
 
     if (ret != size)
@@ -209,11 +194,8 @@ static void __traverse_dir(DOS_FS *fs, uint32_t clus_num)
     dump_area(clus_offset, fs->cluster_size, buf_clus);
 
     while (clus_num > 0 && clus_num < fs->clusters + FAT_START_ENT) {
-        if (lseek(fd_in, clus_offset + offset, SEEK_SET) !=
-                clus_offset + offset)
-            pdie("Seek to %lld of input(%d,%s)", clus_offset + offset, __LINE__, __func__);
 
-        if (read(fd_in, &de, sizeof(DIR_ENT)) < 0)
+        if (pread(fd_in, &de, sizeof(DIR_ENT), clus_offset + offset) < 0)
             pdie("Read %d bytes at %lld(%d,%s)",
                     sizeof(DIR_ENT), clus_offset, __LINE__, __func__);
 
@@ -288,13 +270,8 @@ static void dump_data(DOS_FS *fs)
         dump_area(clus_offset, fs->cluster_size, buf_clus);
 
         for (i = 0; i < fs->root_entries; i++) {
-            if (lseek(fd_in, clus_offset + i * sizeof(DIR_ENT), SEEK_SET) !=
-                    clus_offset + i * sizeof(DIR_ENT)) {
-                pdie("Seek to %lld of input(%d,%s)",
-                        clus_offset + i * sizeof(DIR_ENT), __LINE__, __func__);
-            }
-
-            if (read(fd_in, &de, sizeof(DIR_ENT)) < 0) {
+            if (pread(fd_in, &de, sizeof(DIR_ENT),
+                        clus_offset + i * sizeof(DIR_ENT)) < 0) {
                 pdie("Read %d bytes at %lld(%d,%s)", sizeof(DIR_ENT),
                         clus_offset + i * sizeof(DIR_ENT), __LINE__, __func__);
             }
@@ -349,11 +326,7 @@ static void dump__read_fat(DOS_FS *fs)
     while (remain_size > 0) {
         int i;
 
-        if (lseek(fd_in, start_offset + offset, SEEK_SET) !=
-                start_offset + offset)
-            pdie("Seek to %lld of input(%d,%s)", start_offset + offset, __LINE__, __func__);
-
-        if (read(fd_in, fat, read_size) < 0)
+        if (pread(fd_in, fat, read_size, start_offset + offset) < 0)
             pdie("Read %d bytes at %lld(%d,%s)",
                     read_size, start_offset + offset, __LINE__, __func__);
 
@@ -437,10 +410,7 @@ static int dump__read_boot(DOS_FS *fs, struct boot_sector *b)
     int change_flag = 0;
 
     /* read boot_sector */
-    if (lseek(fd_in, 0, SEEK_SET) != 0)
-        pdie("Seek to %lld of input(%d,%s)", 0, __LINE__, __func__);
-
-    if (read(fd_in, b, sizeof(struct boot_sector)) < 0)
+    if (pread(fd_in, b, sizeof(struct boot_sector), 0) < 0)
         pdie("Read %d bytes at %lld(%d,%s)",
                 sizeof(struct boot_sector), 0, __LINE__, __func__);
 

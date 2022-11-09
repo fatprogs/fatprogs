@@ -113,10 +113,7 @@ void fs_read(loff_t pos, int size, void *data)
 {
     int got;
 
-    if (llseek(fd, pos, SEEK_SET) != pos)
-        pdie("Seek to %lld(%d,%s)", pos, __LINE__, __func__);
-
-    if ((got = read(fd, data, size)) < 0)
+    if ((got = pread(fd, data, size, pos)) < 0)
         die("Got %d bytes instead of %d at %lld(%d,%s)",
                 got, size, pos, __LINE__, __func__);
 
@@ -132,11 +129,8 @@ int fs_test(loff_t pos, int size)
     void *scratch;
     int okay;
 
-    if (llseek(fd, pos, SEEK_SET) != pos)
-        pdie("Seek to %lld(%d,%s)", pos, __LINE__, __func__);
-
     scratch = alloc_mem(size);
-    okay = read(fd, scratch, size) == size;
+    okay = pread(fd, scratch, size, pos) == size;
     free_mem(scratch);
     return okay;
 }
@@ -249,10 +243,7 @@ void fs_write(loff_t pos, int size, void *data)
 
     if (write_immed) {
         did_change = 1;
-        if (llseek(fd, pos, SEEK_SET) != pos)
-            pdie("Seek to %lld(%d,%s)", pos, __LINE__, __func__);
-
-        if ((did = write(fd, data, size)) == size)
+        if ((did = pwrite(fd, data, size, pos)) == size)
             return;
         if (did < 0)
             pdie("Write %d bytes at %lld(%d,%s)", size, pos, __LINE__, __func__);
@@ -364,10 +355,7 @@ static void fs_flush(void)
     while (changes) {
         this = changes;
         changes = changes->next;
-        if (llseek(fd, this->pos, SEEK_SET) != this->pos)
-            fprintf(stderr, "Seek to %lld failed: %s\n  Did not write %d bytes.\n",
-                    (long long)this->pos, strerror(errno), this->size);
-        else if ((size = write(fd, this->data, this->size)) < 0)
+        if ((size = pwrite(fd, this->data, this->size, this->pos)) < 0)
             fprintf(stderr, "Writing %d bytes at %lld failed: %s\n",
                     this->size, (long long)this->pos, strerror(errno));
         else if (size != this->size)

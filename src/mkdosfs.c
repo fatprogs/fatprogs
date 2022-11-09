@@ -199,6 +199,12 @@ char dummy_boot_code[BOOTCODE_SIZE] =
             error("failed whilst writing " errstr);	\
     } while (0)
 
+#define pwritebuf(buf, size, pos, errstr)			\
+    do {							\
+        int __size = (size);				\
+        if (pwrite(dev, buf, __size, pos) != __size)		\
+            error("failed whilst writing " errstr);	\
+    } while (0)
 /* Global variables - the root of all evil :-) - see these and weep! */
 
 static char *template_boot_code;	/* Variable to store a full template boot sector in */
@@ -303,9 +309,8 @@ static void mark_FAT_cluster(int cluster, unsigned int value)
                 CT_LE_L((value & 0xfffffff) | (saved & 0xf0000000));
 
             for (i = 0; i < nr_fats; i++) {
-                seekto((fat_size * i) + fat_start + 4 * cluster,
+                pwritebuf(&data, 4, (fat_size * i) + fat_start + 4 * cluster,
                         "mark_FAT_cluster");
-                writebuf(&data, 4, "mark_FAT_cluster");
             }
             break;
 
@@ -334,13 +339,8 @@ static long do_check(char *buffer, int try, off_t current_block)
 {
     long got;
 
-    /* Seek to the correct location */
-    if (llseek(dev, current_block * BLOCK_SIZE, SEEK_SET)
-            != current_block * BLOCK_SIZE)
-        die("seek failed during testing for blocks");
-
     /* Try reading! */
-    got = read(dev, buffer, try * BLOCK_SIZE);
+    got = pread(dev, buffer, try * BLOCK_SIZE, current_block * BLOCK_SIZE);
     if (got < 0)
         got = 0;
 
@@ -457,10 +457,7 @@ static int valid_offset(int fd, loff_t offset)
 {
     char ch;
 
-    if (llseek(fd, offset, SEEK_SET) < 0)
-        return FALSE;
-
-    if (read(fd, &ch, 1) < 1)
+    if (pread(fd, &ch, 1, offset) < 1)
         return FALSE;
 
     return TRUE;
