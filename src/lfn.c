@@ -191,7 +191,6 @@ void lfn_add_slot(DIR_ENT *de, loff_t dir_offset)
             }
             else {
                 printf("  Not auto-correcting this.\n");
-                remain_dirty = 1;
             }
 
             if (interactive) {
@@ -212,6 +211,7 @@ void lfn_add_slot(DIR_ENT *de, loff_t dir_offset)
                 }
             }
         }
+
         if (!skip) {
             lfn_slot = slot;
             lfn_checksum = lfn->alias_checksum;
@@ -237,11 +237,10 @@ void lfn_add_slot(DIR_ENT *de, loff_t dir_offset)
                     "3: Set start bit\n");
         }
         else {
-            printf("  Not auto-correcting this.\n");
-            remain_dirty = 1;
+            printf("  Auto-deleting LFN fragment.\n");
         }
 
-        switch (interactive ? get_key("123", "?") : '2') {
+        switch (interactive ? get_key("123", "?") : '1') {
             case '1':
                 if (!lfn_offsets)
                     lfn_offsets = alloc_mem(sizeof(loff_t));
@@ -291,11 +290,10 @@ void lfn_add_slot(DIR_ENT *de, loff_t dir_offset)
                 printf("3: Correct sequence number\n");
         }
         else {
-            printf("  Not auto-correcting this.\n");
-            remain_dirty = 1;
+            printf("  Auto-deleting LFN.\n");
         }
 
-        switch (interactive ? get_key(can_fix ? "123" : "12", "?") : '2') {
+        switch (interactive ? get_key(can_fix ? "123" : "12", "?") : '1') {
             case '1':
                 if (!lfn_offsets) {
                     lfn_offsets = alloc_mem(sizeof(loff_t));
@@ -329,25 +327,22 @@ void lfn_add_slot(DIR_ENT *de, loff_t dir_offset)
                     "3: Correct checksum\n");
         }
         else {
-            printf("  Not auto-correcting this.\n");
-            remain_dirty = 1;
+            printf("  Auto-correcting checksum.\n");
         }
 
-        if (interactive) {
-            switch (get_key("123", "?")) {
-                case '1':
-                    lfn_offsets[lfn_parts++] = dir_offset;
-                    clear_lfn_slots(0, lfn_parts - 1);
-                    lfn_reset();
-                    return;
-                case '2':
-                    break;
-                case '3':
-                    lfn->alias_checksum = lfn_checksum;
-                    fs_write(dir_offset + offsetof(LFN_ENT, alias_checksum),
-                            sizeof(lfn->alias_checksum), &lfn->alias_checksum);
-                    break;
-            }
+        switch (interactive ? get_key("123", "?") : '3') {
+            case '1':
+                lfn_offsets[lfn_parts++] = dir_offset;
+                clear_lfn_slots(0, lfn_parts - 1);
+                lfn_reset();
+                return;
+            case '2':
+                break;
+            case '3':
+                lfn->alias_checksum = lfn_checksum;
+                fs_write(dir_offset + offsetof(LFN_ENT, alias_checksum),
+                        sizeof(lfn->alias_checksum), &lfn->alias_checksum);
+                break;
         }
     }
 
@@ -375,6 +370,7 @@ void lfn_add_slot(DIR_ENT *de, loff_t dir_offset)
                     sizeof(lfn->reserved), &lfn->reserved);
         }
     }
+
     if (lfn->start != CT_LE_W(0)) {
         printf("Start cluster field in VFAT long filename slot is not 0 "
                 "(but 0x%04x).\n", lfn->start);
@@ -433,7 +429,6 @@ char *lfn_get(DIR_ENT *de)
         }
         else {
             printf("  Not auto-correcting this.\n");
-            remain_dirty = 1;
         }
 
         switch (interactive ? get_key("123", "?") : '2') {
@@ -476,26 +471,23 @@ char *lfn_get(DIR_ENT *de)
                     short_name);
         }
         else {
-            printf("  Not auto-correcting this.\n");
-            remain_dirty = 1;
+            printf("  Auto-deleting LFN.\n");
         }
 
-        if (interactive) {
-            switch (get_key("123", "?")) {
-                case '1':
-                    clear_lfn_slots(0, lfn_parts - 1);
-                    lfn_reset();
-                    return NULL;
-                case '2':
-                    lfn_reset();
-                    return NULL;
-                case '3':
-                    for( i = 0; i < lfn_parts; ++i ) {
-                        fs_write(lfn_offsets[i] + offsetof(LFN_ENT, alias_checksum),
-                                sizeof(sum), &sum);
-                    }
-                    break;
-            }
+        switch (interactive ? get_key("123", "?") : '1') {
+            case '1':
+                clear_lfn_slots(0, lfn_parts - 1);
+                lfn_reset();
+                return NULL;
+            case '2':
+                lfn_reset();
+                return NULL;
+            case '3':
+                for (i = 0; i < lfn_parts; ++i) {
+                    fs_write(lfn_offsets[i] + offsetof(LFN_ENT, alias_checksum),
+                            sizeof(sum), &sum);
+                }
+                break;
         }
     }
 
