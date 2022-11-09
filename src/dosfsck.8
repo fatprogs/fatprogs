@@ -1,81 +1,123 @@
-.TH DOSFSCK 8 "December 31 1997" "Linux" "MAINTENANCE COMMANDS"
+.TH DOSFSCK 8 "2022-08-10" "fatprogs 2.13.0"
 .SH NAME
 dosfsck \- check and repair MS-DOS file systems
 .SH SYNOPSIS
 .ad l
 .B dosfsck|fsck.msdos|fsck.vfat
-.RB [ \-aAflnrtvVwy ]
+.RB [ \-aACflnrtvVwy ]
 .RB [ \-d\ \fIpath\fB\ \-d\ \fI...\fB ]
 .RB [ \-u\ \fIpath\fB\ \-u\ \fI...\fB ]
 .I device
 .ad b
 .SH DESCRIPTION
 .B dosfsck
-verifies the consistency of MS-DOS file systems and optionally tries to
-repair them. The following file system problems can be corrected (in this
-order):
-.IP \-
-FAT contains invalid cluster numbers. Cluster is changed to EOF.
+verifies the consistency of MS-DOS file systems and optionally tries to repair
+them. The following file system problems can be corrected (in this order):
+.IP "Boot Sector
 .PD 0
-.IP \-
+.IP - 4
+Boot sector has invalid parameters. Verify backup boot sector(only for FAT32).
+If backup is valid, then replace with it. Otherwise exit.
+.IP -
+Boot sector does not have filesystem information sector. Create new filesystem
+information sector in first sector.
+.PD
+.IP "FAT"
+.PD 0
+.IP -
+One of FAT has corrupted. they are copied with verified FAT.
+.IP -
+FAT contains invalid cluster numbers. Cluster is changed to EOF.
+.PD
+.IP "File/Directory"
+.PD 0
+.IP -
+First entry(.) and second entry(..) are non-directories.
+They are set to directory.
+.IP -
+Dot(.) and dotdot(..) entry's start cluster is invalid.
+They are set to valid start cluster.
+.IP -
+First/second entry is not ".", ".." or empty, create them.
+.IP -
 File's cluster chain contains a loop. The loop is broken.
-.IP \-
-Bad clusters (read errors). The clusters are marked bad and they are
-removed from files owning them. This check is optional.
-.IP \-
-Directories with a large number of bad entries (probably corrupt). The
-directory can be deleted.
-.IP \-
-Files . and .. are non-directories. They can be deleted or renamed.
-.IP \-
-Directories . and .. in root directory. They are deleted.
-.IP \-
+.IP -
+Bad clusters (read errors). The clusters are marked bad and they are removed
+from files owning them. This check is optional.
+.IP -
+Directories with a large number of bad entries (probably corrupt).
+If the number of bad entries is more than 10 times of good entries.
+The directory is deleted.
+.IP -
+Directories "." and ".." in root directory. They are deleted.
+.IP -
 Bad file names. They can be renamed.
-.IP \-
-Duplicate directory entries. They can be deleted or renamed.
-.IP \-
+.IP -
+Duplicate directory entries. They can be renamed or deleted.
+.IP -
+Can't determine whether entry is file or directory. Consider it to file.
+.IP -
 Directories with non-zero size field. Size is set to zero.
-.IP \-
-Directory . does not point to parent directory. The start pointer is
-adjusted.
-.IP \-
-Directory .. does not point to parent of parent directory. The start pointer
-is adjusted.
-.IP \-
-Start cluster number of a file is invalid. The file is truncated.
-.IP \-
+.IP -
+Directory "." does not point to parent directory. The start pointer is adjusted.
+.IP -
+Directory ".." does not point to parent of parent directory.
+The start pointer is adjusted.
+.IP -
+Start cluster number of a directory is invalid. The directory is deleted.
+.IP -
+Volume label has start cluster. Fix it.
+.IP -
+Volume label is not in root directory. They can be deleted.
+.IP -
 File contains bad or free clusters. The file is truncated.
-.IP \-
-File's cluster chain is longer than indicated by the size fields. The file
-is truncated.
-.IP \-
-Two or more files share the same cluster(s). All but one of the files are
-truncated. If the file being truncated is a directory file that has already
-been read, the file system check is restarted after truncation.
-.IP \-
-File's cluster chain is shorter than indicated by the size fields. The file
-is truncated.
-.IP \-
-Clusters are marked as used but are not owned by a file. They are marked
-as free.
+.IP -
+Two or more files share the same cluster(s).
+All but one of the files are truncated. If the file being truncated is
+a directory entry that has already been read, the file system check is
+restarted after truncation.
+.IP -
+File's cluster chain is longer than indicated by the size fields.
+The file size is changed. (truncation is better?)
+.IP -
+File's cluster chain is shorter than indicated by the size fields.
+The file is truncated.
+.PD
+.IP "Volume Label"
+.PD 0
+.IP -
+Volume label is not exist. Set to default volume label "NO NAME    ".
+.IP -
+Volume is invalid. remove it. (set to default label)
+.IP -
+Multiple volume labels are in root directory entry.
+All but one(first found volume entry) of them are removed.
+.IP -
+One of volume label in boot and root is invalid. Copy valid label to other side.
+.PD
+.IP "Orphan Cluster"
+.PD 0
+.IP -
+Clusters are marked as used but are not owned by a file.
+They are marked as free or created as file (optional).
+Files are created in FOUND.NNN directory. where NNN is 3 digit number(000 ~ 999).
+Each directory can create 10 thousand entries.
 .PD
 .LP
-Additionally, the following problems are detected, but not repaired:
-.IP \-
-Invalid parameters in boot sector.
+Additionally, the following problems are detected, but not repaired or handled:
 .PD 0
-.IP \-
-Absence of . and .. entries in non-root directories
+.IP - 4
+in case of the number of FAT is more than 3.
 .PD
 .LP
 When \fBdosfsck\fP checks a file system, it accumulates all changes in memory
-and performs them only after all checks are complete. This can be disabled
-with the \fB\-w\fP option.
+and performs them only after all checks are complete.
+This can be disabled with the \fB\-w\fP option.
 .SH OPTIONS
 .IP \fB\-a\fP
 Automatically repair the file system. No user intervention is necessary.
-Whenever there is more than one method to solve a problem, the least
-destructive approach is used.
+Whenever there is more than one method to solve a problem,
+the least destructive approach is used.
 .IP \fB\-A\fP
 Use Atari variation of the MS-DOS filesystem. This is default if
 \fBdosfsck\fP is run on an Atari, then this option turns off Atari
@@ -87,6 +129,9 @@ both systems recognize all values from 0xfff8...0xffff as end-of-file.
 MS-DOS uses only 0xfff7 for bad clusters, where on Atari values
 0xfff0...0xfff7 are for this purpose (but the standard value is still
 0xfff7).
+.IP \fB\-C\fP
+Check only volume dirty flag. If it is set, other options are ignored.
+If volume is clean, return 0, otherwise return 4 (It means errors left)
 .IP \fB\-d\fP
 Delete the specified file. If more that one file with that name exists, the
 first one is deleted.
@@ -97,7 +142,7 @@ added to the free disk space except in auto mode (\fB-a\fP).
 List path names of files being processed.
 .IP \fB\-n\fP
 No-operation mode: non-interactively check for errors, but don't write
-anything to the filesystem. 
+anything to the filesystem.
 .IP \fB\-r\fP
 Interactively repair the file system. The user is asked for advice whenever
 there is more than one approach to fix an inconsistency.
@@ -128,20 +173,39 @@ but not repaired.
 No recoverable errors have been detected.
 .IP 1
 Recoverable errors have been detected or \fBdosfsck\fP has discovered an
-internal inconsistency.
+internal inconsistency. And errors are corrected.
 .IP 2
-Usage error. \fBdosfsck\fP did not access the file system.
+It's not FAT filesystem. \fBdosfsck\fP did not access the file system.
+.IP 4
+Errors are detected, but some of them are not corrected.
+.IP 8
+\fBdosfsck\fP exit during operation with error, or unmanageable situation.
+.IP 16
+Usage error. check usage using '\fBdosfsck --help'\fP.
+.IP 64
+System call like open/read/write/lseek error.
 .SH FILES
-.IP "fsck0000.rec, fsck0001.rec, ..."
-When recovering from a corrupted file system, dosfsck dumps recovered data
-into files named 'fsckNNNN.rec' in the top level directory of the file system.
+.IP "FOUND.000, FOUND.001, ..."
+When recovering orphan cluster, recovered file are stored in these directories.
+Each directory of FOUND.NNN can include 10 thousand files which named 'FSCKNNNN.REC'.
+.IP "FSCK0000.REC, FSCK0001.REC, ..."
+When recovering from a corrupted file system, \fBdosfsck\fP dumps recovered data
+into files named 'FSCKNNNN.REC' in FOUND.NNN which is in the top level
+directory of the file system.
+.IP "FSCK0000.000, FSCK0000.001, ..."
+When \fBdosfsck\fP found bad name entry, will rename those files to 'FSCKNNNN.NNN'
+in entry's parent directory.
 .SH BUGS
-Does not create . and .. files where necessary. Does not remove entirely
-empty directories. Should give more diagnostic messages. Undeleting files
-should use a more sophisticated algorithm.
-.\".SH "SEE ALSO"
-.\"fs(5)
+Should give more diagnostic messages. Undeleting files should use a more
+sophisticated algorithm.
+.SH "SEE ALSO"
+.BR mkdosfs(8)
+.BR dosfslabel(8)
+.BR dosfsdump(8)
 .SH AUTHORS
-Werner Almesberger <werner.almesberger@lrc.di.epfl.ch>
-Extensions (FAT32, VFAT) by and current maintainer:
-Roman Hodek <roman@hodek.net>
+\fBdosfstools\fP were written by Werner Almesberger <werner.almesberger@lrc.di.epfl.ch>
+Extensions (FAT32, VFAT) by Roman Hodek <roman@hodek.net>
+fatprogs maintainer is JaeHoon Sim (jay.sim@lge.com).
+.SH ACKNOWLEDGMENTS
+.B fatprogs
+is based on code from dofstools v2.11(GPLv2).

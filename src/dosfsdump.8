@@ -1,0 +1,40 @@
+.TH DOSFSDUMP 8 "2022-08-10" "fatprogs 2.13.0"
+.SH NAME
+dosfsdump \- dump metadata of MS-DOS file system
+.SH SYNOPSIS
+.ad l
+.B dosfsdump
+.RB [ \-o\ \fIpath\fB\ ]
+.RB [ \-vh ]
+.I device
+.ad b
+.SH DESCRIPTION
+.B dosfsdump
+dump metadata of MS-DOS file systems for debugging. \fBdosfsdump\fP dump
+boot sector, File Allocation Table and all metadata which can reach from root directory.
+.SH OPTIONS
+.TP
+.BI \-o " path "
+specify output result file. If filesystem to which output file is written
+does not support sparse file, output file size may be larger than expectation.
+If you want to dump to standard output, you should use '-' in place of \fIpath\fP.
+.IP \fB\-v\fP
+Verbose mode. Generates slightly more output.
+.IP \fB\-h\fP
+Help mode, Prints help message of \fBdosfsdump\fP.
+.SH EXAMPLE
+It is possible to dump to more smaller size using the following command:
+.PP
+.in +4n
+.EX
+.RB "$" " dosfsdump -o - <device> | bzip2 > <output file>"
+.EE
+.SH "SEE ALSO"
+.BR dosfsck(8)
+.BR mkdosfs(8)
+.BR dosfslabel(8)
+.SH AUTHORS
+written by JaeHoon Sim (jay.sim@lge.com) and Hyuncheol.lee.
+.SH ACKNOWLEDGMENTS
+.B fatprogs
+is based on code from dofstools v2.11(GPLv2).
