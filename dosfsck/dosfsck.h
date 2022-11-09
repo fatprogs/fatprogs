@@ -38,6 +38,18 @@
 #endif /* __BIG_ENDIAN */
 
 #define VFAT_LN_ATTR (ATTR_RO | ATTR_HIDDEN | ATTR_SYS | ATTR_VOLUME)
+#define VFAT_LN_ATTR_MASK \
+    (ATTR_RO | ATTR_HIDDEN | ATTR_SYS | ATTR_VOLUME | ATTR_DIR | ATTR_ARCH)
+
+#define IS_LFN_ENT(attr) (((attr) & VFAT_LN_ATTR_MASK) == VFAT_LN_ATTR)
+#define IS_VOLUME_LABEL(attr) ((attr) & ATTR_VOLUME)
+
+#define LABEL_NONAME    "NO NAME    "
+#define LABEL_EMPTY     "           "
+#define LEN_VOLUME_LABEL    MSDOS_NAME
+#define LEN_FILE_NAME       MSDOS_NAME  /* total 8.3 file size(8 + 3) */
+#define LEN_FILE_BASE   8
+#define LEN_FILE_EXT    3           /* file extension size */
 
 /* ++roman: Use own definition of boot sector structure -- the kernel headers'
  * name for it is msdos_boot_sector in 2.0 and fat_boot_sector in 2.1 ... */
@@ -72,7 +84,7 @@ struct boot_sector {
 
     __u8        extended_sig;   /* Extended Signature (0x29) */
     __u32       serial;         /* Serial number */
-    __u8        label[11];      /* FS label */
+    __u8        label[LEN_VOLUME_LABEL];    /* FS label */
     __u8        fs_type[8];     /* FS Type */
 
     /* fill up to 512 bytes */
@@ -101,7 +113,7 @@ struct boot_sector_16 {
 
     __u8        extended_sig;   /* Extended Signature (0x29) */
     __u32       serial;         /* Serial number */
-    __u8        label[11];      /* FS label */
+    __u8        label[LEN_VOLUME_LABEL];      /* FS label */
     __u8        fs_type[8];     /* FS Type */
 
     /* fill up to 512 bytes */
@@ -121,7 +133,7 @@ struct info_sector {
 };
 
 typedef struct {
-    __u8	name[8], ext[3];    /* name and extension */
+    __u8	name[LEN_FILE_NAME]; /* name and extension */
     __u8	attr;		/* attribute bits */
     __u8	lcase;		/* Case for base and extension */
     __u8	ctime_ms;	/* Creation time, milliseconds */
@@ -167,6 +179,19 @@ typedef struct {
     FAT_ENTRY *fat;
     char *label;
 } DOS_FS;
+
+typedef enum { LABEL_FLAG_NONE, LABEL_FLAG_BAD } label_flag_t;
+#define LABEL_FAKE_ADDR     (label_t **)(0xFFBADA00)
+
+/* struct _label */
+typedef struct _label {
+    int flag;
+    DOS_FILE *file;
+    struct _label *next;
+} label_t;
+
+label_t *label_head;
+label_t *label_last;
 
 #ifndef offsetof
 #define offsetof(t, e)	((off_t)&(((t *)0)->e))

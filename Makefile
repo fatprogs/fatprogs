@@ -27,7 +27,7 @@ distclean:
 	$(MAKE) -C dosfsck $@
 	rm -f TAGS .#* .new* \#*# *~
 
-debug: OPTFLAGS = -O -g -fno-omit-frame-pointer -D_FILE_OFFSET_BITS=64 -fsanitize=address
+debug: OPTFLAGS = -O0 -g -fno-omit-frame-pointer -D_FILE_OFFSET_BITS=64 -fsanitize=address
 debug: LDFLAGS += -fsanitize=address
 debug: all
 

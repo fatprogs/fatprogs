@@ -438,7 +438,7 @@ char *lfn_get(DIR_ENT *de)
         }
     }
 
-    for (sum = 0, i = 0; i < 11; i++)
+    for (sum = 0, i = 0; i < LEN_FILE_NAME; i++)
         sum = (((sum & 1) << 7) | ((sum & 0xfe) >> 1)) + de->name[i];
 
     if (sum != lfn_checksum) {
@@ -519,8 +519,9 @@ void scan_lfn(DIR_ENT *de, loff_t dir_offset)
     int slot = lfn_ent->id & LFN_ID_SLOTMASK;
     unsigned int offset;
 
-    if (lfn_slot == 0)
+    if (lfn_slot == 0) {
         lfn_check_orphaned();
+    }
 
     if (lfn_ent->id & LFN_ID_START && slot != 0) {
         lfn_slot = slot;

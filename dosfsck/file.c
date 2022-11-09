@@ -21,6 +21,7 @@
 
 #include "common.h"
 #include "file.h"
+#include "dosfsck.h"
 
 FDSC *fp_root = NULL;
 
@@ -70,7 +71,7 @@ int file_cvt(unsigned char *name, unsigned char *fixed)
     unsigned char c;
     int size, ext, cnt;
 
-    size = 8;
+    size = LEN_FILE_BASE;
     ext = 0;
     while (*name) {
         c = *name;
@@ -89,7 +90,7 @@ int file_cvt(unsigned char *name, unsigned char *fixed)
             while (size--)
                 *fixed++ = ' ';
 
-            size = 3;
+            size = LEN_FILE_EXT;
             ext = 1;
             name++;
             continue;
@@ -119,7 +120,6 @@ int file_cvt(unsigned char *name, unsigned char *fixed)
             *fixed++ = c;
             size--;
         }
-
         name++;
     }
 

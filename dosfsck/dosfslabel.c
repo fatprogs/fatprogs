@@ -68,9 +68,11 @@ int main(int argc, char *argv[])
 {
     DOS_FS fs;
     int rw = 0;
+    int save_nfats = 0;
 
     char *device = NULL;
     char *label = NULL;
+    char vol_label[LEN_VOLUME_LABEL + 1] = {'\0', };
 
     check_atari();
 
@@ -97,12 +99,40 @@ int main(int argc, char *argv[])
 
     fs_open(device, rw);
     read_boot(&fs);
+
+    /* dosfslabel doesn't need second FAT handling in read_fat()
+     * so change fs.nfats to 1 temporarily and
+     * after calling read_fat() restore original value */
+    save_nfats = fs.nfats;
+    fs.nfats = 1;
+    read_fat(&fs);
+    fs.nfats = save_nfats;
+
     if (!rw) {
         fprintf(stdout, "%s\n", fs.label);
+
+#ifdef DEBUG_TEST
+        for (int i = 0; i < strlen(fs.label); i++) {
+            fprintf(stdout, "%02x ", fs.label[i]);
+        }
+        printf("\n");
+#endif
+
         exit(0);
     }
 
-    write_label(&fs, label);
+    scan_root_only(&fs, &label_head, &label_last);
+    if (label_head && (label_head != label_last)) {
+        printf("Multiple label entries in root, do dosfsck first\n");
+        goto out;
+    }
+
+    memcpy(vol_label, label, strlen(label));
+    if (check_valid_label(vol_label) == 0) {
+        write_label(&fs, vol_label, &label_head, &label_last);
+    }
+
+out:
     clean_boot(&fs);
     return fs_close(rw) ? 1 : 0;
 }

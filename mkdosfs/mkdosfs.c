@@ -122,7 +122,7 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA. */
 #define mark_sector_bad(sector) mark_FAT_sector(sector, FAT_BAD)
 
 /* Compute ceil(a/b) */
-inline int cdiv(int a, int b)
+inline __attribute__((always_inline)) int cdiv(int a, int b)
 {
     return (a + b - 1) / b;
 }

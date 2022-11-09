@@ -17,4 +17,9 @@ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern);
    be checked again. */
 int scan_root(DOS_FS *fs);
 
+int check_volume_label(DOS_FS *fs);
+int check_valid_label(char *label);
+void scan_root_only(DOS_FS *fs, label_t **head, label_t **last);
+void write_label(DOS_FS *fs, char *label, label_t **head, label_t **last);
+
 #endif

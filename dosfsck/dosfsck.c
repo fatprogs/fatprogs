@@ -155,6 +155,8 @@ int main(int argc, char **argv)
     if (test)
         fix_bad(&fs);
 
+    check_volume_label(&fs);
+
     if (salvage_files)
         reclaim_file(&fs);
     else
@@ -168,6 +170,7 @@ int main(int argc, char **argv)
         printf("Starting verification pass.\n");
         read_fat(&fs);
         scan_root(&fs);
+        check_volume_label(&fs);
         reclaim_free(&fs);
         qfree(&mem_queue);
     }

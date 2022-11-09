@@ -7,7 +7,6 @@
 
 void read_boot(DOS_FS *fs);
 void clean_boot(DOS_FS *fs);
-void write_label(DOS_FS *fs, char *label);
 
 /* Reads the boot sector from the currently open device and initializes *FS */
 

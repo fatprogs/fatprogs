@@ -19,6 +19,9 @@
 #include "lfn.h"
 #include "check.h"
 
+void remove_lfn(DOS_FS *fs, DOS_FILE *file);
+void scan_volume_entry(DOS_FS *fs, label_t **head, label_t **last);
+
 static DOS_FILE *root;
 
 /* get start field of a dir entry */
@@ -116,19 +119,24 @@ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
             memset(&d2, 0, sizeof(d2));
             offset = cluster_start(fs, clu_num);
 
-            /* TODO: ??? why it does not use memset to clear cluster */
+            /* TODO: ??? why it use for loop to clear cluster */
             for (i = 0; i < fs->cluster_size; i += sizeof(DIR_ENT))
                 fs_write(offset + i, sizeof(d2), &d2);
         }
 
         memset(de, 0, sizeof(DIR_ENT));
+
+        /* if pattern is NULL, then just allocate root entry
+         * and do not fill DIR_ENT structure */
+        if (!pattern)
+            return offset;
+
+        /* make entry using pattern */
         while (1) {
             char expanded[12];
 
             sprintf(expanded, pattern, curr_num);
-            /* TODO: why split into 2 part, do just call memcpy once?? */
-            memcpy(de->name, expanded, 8);
-            memcpy(de->ext, expanded + 8, 3);
+            memcpy(de->name, expanded, LEN_FILE_NAME);
             clu_num = fs->root_cluster;
             i = 0;
             offset2 = cluster_start(fs, clu_num);
@@ -180,13 +188,17 @@ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
         offset = fs->root_start + next_free * sizeof(DIR_ENT);
         memset(de, 0, sizeof(DIR_ENT));
 
+        /* if pattern is NULL, then just allocate root entry
+         * and do not fill DIR_ENT structure */
+        if (!pattern)
+            return offset;
+
+        /* make entry using pattern */
         while (1) {
             char expanded[12];
 
             sprintf(expanded, pattern, curr_num);
-            /* TODO: why split into 2 part, do just call memcpy once?? */
-            memcpy(de->name, expanded, 8);
-            memcpy(de->ext, expanded + 8, 3);
+            memcpy(de->name, expanded, LEN_FILE_NAME);
 
             for (scan = 0; scan < fs->root_entries; scan++)
                 if (scan != next_free &&
@@ -259,6 +271,22 @@ static char *file_stat(DOS_FILE *file)
     return temp;
 }
 
+/* illegal characters in short file name:
+ * - less than 0x20 except for the special case of 0x05 in dir_ent.name[0].
+ * - 0x22("), 0x2A(*), 0x2B(+), 0x2C(,), 0x2E(.), 0x2F(/),
+ *   0x3A(:), 0x3B(;), 0x3C(<), 0x3D(=), 0x3E(>), 0x3F(?),
+ *   0x5B([), 0x5C(\), 0x5D(]),
+ *   0x7C(|)
+ *
+ * legal characters in long file name:
+ * - 0x2B(+), 0x2c(,), 0x3B(;), 0x3D(=), 0x5B([), 0x5D(])
+ * - 0x2E(.) can be used multiple times within long file name
+ *   leading and embedded periods are allowed.
+ *   trailing periods are ignored.
+ * - 0x20( ) is valid character in a long file name
+ *   embedded spaces within long file name are allowed.
+ *   leading and trailing spaces are ignored.
+ */
 static int bad_name(unsigned char *name)
 {
     int i, spc, suspicious = 0;
@@ -266,11 +294,12 @@ static int bad_name(unsigned char *name)
 
     /* Do not complain about (and auto-correct) the extended attribute files
      * of OS/2. */
-    if (strncmp((char *)name, "EA DATA  SF",11) == 0 ||
-            strncmp((char *)name, "WP ROOT  SF",11) == 0)
+    if (strncmp((char *)name, "EA DATA  SF", LEN_FILE_NAME) == 0 ||
+            strncmp((char *)name, "WP ROOT  SF", LEN_FILE_NAME) == 0)
         return 0;
 
-    for (i = 0; i < 8; i++) {
+    /* check file body characters */
+    for (i = 0; i < LEN_FILE_BASE; i++) {
         if (name[i] < ' ' || name[i] == 0x7f)
             return 1;
         if (name[i] > 0x7f)
@@ -279,7 +308,8 @@ static int bad_name(unsigned char *name)
             return 1;
     }
 
-    for (i = 8; i < 11; i++) {
+    /* check file extension characters */
+    for (i = LEN_FILE_BASE; i < LEN_FILE_NAME; i++) {
         if (name[i] < ' ' || name[i] == 0x7f)
             return 1;
         if (name[i] > 0x7f)
@@ -288,8 +318,9 @@ static int bad_name(unsigned char *name)
             return 1;
     }
 
+    /* check space character in file body characters */
     spc = 0;
-    for (i = 0; i < 8; i++) {
+    for (i = 0; i < LEN_FILE_BASE; i++) {
         if (name[i] == ' ')
             spc = 1;
         else if (spc)
@@ -298,8 +329,9 @@ static int bad_name(unsigned char *name)
             return 1;
     }
 
+    /* check space character in file extension characters */
     spc = 0;
-    for (i = 8; i < 11; i++) {
+    for (i = LEN_FILE_BASE; i < LEN_FILE_NAME; i++) {
         if (name[i] == ' ')
             spc = 1;
         else if (spc)
@@ -324,6 +356,7 @@ static void drop_file(DOS_FS *fs, DOS_FILE *file)
 {
     uint32_t cluster;
 
+    remove_lfn(fs, file);
     MODIFY(file, name[0], DELETED_FLAG);
     for (cluster = FSTART(file, fs);
             cluster > 0 && cluster < fs->clusters + 2;
@@ -365,10 +398,6 @@ static int __find_lfn(DOS_FS *fs, DOS_FILE *parent, loff_t offset,
     }
 
     fs_read(offset, sizeof(DIR_ENT), &de);
-
-    if (IS_FREE(de.name)) {
-        lfn_check_orphaned();
-    }
 
     if (de.attr == VFAT_LN_ATTR) {
         scan_lfn(&de, offset);
@@ -496,7 +525,6 @@ static void rename_file(DOS_FS *fs, DOS_FILE *file)
                     remove_lfn(fs, file);
                     file->lfn = NULL;
                 }
-
                 return;
             }
         }
@@ -710,6 +738,7 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
             if (do_trunc != 2 &&
                     (do_trunc == 1 ||
                      (interactive && get_key("12", "?") == '1'))) {
+
                 prev = 0;
                 clusters = 0;
                 for (this = FSTART(owner, fs);
@@ -840,8 +869,6 @@ static int check_dir(DOS_FS *fs, DOS_FILE **root, int dots)
             else
                 dotdot++;
         }
-
-        /* TODO: handle bad volume label */
 
         if (!((*walk)->dir_ent.attr & ATTR_VOLUME) &&
                 bad_name((*walk)->dir_ent.name)) {
@@ -1135,7 +1162,7 @@ static int scan_dir(DOS_FS *fs, DOS_FILE *this, FDSC **cp)
 
     while (clu_num > 0 && clu_num != -1) {
         add_file(fs, &chain, this,
-                cluster_start(fs, clu_num) + (i % fs-> cluster_size), cp);
+                cluster_start(fs, clu_num) + (i % fs->cluster_size), cp);
         i += sizeof(DIR_ENT);
         if (!(i % fs->cluster_size))
             if ((clu_num = next_cluster(fs, clu_num)) == 0 || clu_num == -1)
@@ -1190,6 +1217,678 @@ int scan_root(DOS_FS *fs)
         return 1;
 
     return subdirs(fs, NULL, &fp_root);
+}
+
+void scan_root_only(DOS_FS *fs, label_t **head, label_t **last)
+{
+    DOS_FILE **chain;
+    DOS_FILE *this;
+    int i;
+    int offset = 0;
+    uint32_t clus_num;
+
+    root = NULL;
+    chain = &root;
+    new_dir();
+    if (fs->root_cluster) {
+        add_file(fs, &chain, NULL, 0, &fp_root);
+    }
+    else {
+        for (i = 0; i < fs->root_entries; i++)
+            add_file(fs, &chain, NULL,
+                    fs->root_start + i * sizeof(DIR_ENT), &fp_root);
+    }
+
+    chain = &root->first;
+    this = root;
+    clus_num = FSTART(this, fs);
+    lfn_reset();
+
+    while (clus_num > 0 && clus_num != -1) {
+        add_file(fs, &chain, this,
+                cluster_start(fs, clus_num) + (offset % fs->cluster_size),
+                NULL);
+        offset += sizeof(DIR_ENT);
+        if (!(offset % fs->cluster_size))
+            if ((clus_num = next_cluster(fs, clus_num)) == 0 || clus_num == -1)
+                break;
+    }
+
+    scan_volume_entry(fs, head, last);
+    lfn_reset();
+}
+
+/**
+ * check if boot label is invalid.
+ * - check label length
+ * - check lower character
+ * - check illegal character
+ *
+ * @return  return 0 if label is valid, or return -1
+ */
+int check_valid_label(char *label)
+{
+    int len = 0;
+    int i;
+
+    len = strlen(label);
+    if (len > LEN_VOLUME_LABEL) {
+        printf("labels can be no longer than 11 characters\n");
+        return -1;
+    }
+
+    if (len <= 0) {
+        return -1;
+    }
+
+    if (memcmp(label, LABEL_EMPTY, LEN_VOLUME_LABEL) == 0) {
+        return -1;
+    }
+
+    if (memcmp(label, LABEL_NONAME, LEN_VOLUME_LABEL) == 0) {
+        return 0;
+    }
+
+    /* check blank between characters */
+    for (i = LEN_VOLUME_LABEL; label[i - 1] == 0x20 || !label[i - 1]; i--);
+    len = i;
+
+    for (i = 0; i < len - 1; i++) {
+        if (label[i] == 0x20)
+            return -1;
+    }
+
+    /* check bad character based on long file name specification */
+    for (i = 0; i < len; i++) {
+        if ((unsigned char)label[i] < 0x20) {
+            printf("label has character less than 0x20\n");
+            return -1;
+        }
+        else if (label[i] == 0x22 || label[i] == 0x2A ||
+                label[i] == 0x2E || label[i] == 0x2F ||
+                label[i] == 0x3A || label[i] == 0x3C ||
+                label[i] == 0x3E || label[i] == 0x3F ||
+                label[i] == 0x5C || label[i] == 0x7C) {
+            printf("label has illegal character\n");
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+int check_boot_label(char *boot_label)
+{
+    char blabel[LEN_VOLUME_LABEL + 1] = {'\0', };
+
+    memcpy(blabel, boot_label, strlen(boot_label));
+    return check_valid_label(blabel);
+}
+
+int check_root_label(char *root_label)
+{
+    char rlabel[LEN_VOLUME_LABEL + 1] = {'\0', };
+
+    memcpy(rlabel, root_label, LEN_VOLUME_LABEL);
+    return check_valid_label(rlabel);
+}
+
+/**
+ * get label from console to rename label
+ *
+ * @param[OUT] new_label
+ */
+void get_label(char *new_label)
+{
+    int ret = -1;
+    int len;
+    char *p;
+    char temp_label[64] = {'\0', };
+
+    do {
+        printf("Input label: ");
+        fflush(stdout);
+
+        memset(temp_label, 0, 64);
+        /* enough length to include unicode label length,
+         * but it can not be longer than 11 characters.
+         * check it's length after fgets() called */
+        if (fgets(temp_label, 64, stdin)) {
+            if ((p = strchr(temp_label, '\n')))
+                *p = 0;
+
+            len = strlen(temp_label);
+            if (len > LEN_VOLUME_LABEL) {
+                printf("Label can be no longer than 11 characters,"
+                        " try again\n");
+                continue;
+            }
+
+            ret = check_boot_label(temp_label);
+            if (ret < 0) {
+                printf("label is not valid\n");
+                continue;
+            }
+
+            if (strlen(temp_label) > LEN_VOLUME_LABEL) {
+                printf("volume label is larger than 11."
+                        " truncate label to 11 length\n");
+            }
+            memcpy(new_label, temp_label, LEN_VOLUME_LABEL);
+        }
+    } while (ret < 0);
+}
+
+static void add_label_entry(DOS_FS *fs, DOS_FILE ***chain, DOS_FILE *parent,
+        loff_t offset, DIR_ENT *de)
+{
+    DOS_FILE *new;
+
+    new = qalloc(&mem_queue, sizeof(DOS_FILE));
+    new->lfn = lfn_get(de);
+    new->offset = offset;
+    memcpy(&new->dir_ent, de, sizeof(*de));
+    new->next = new->first = NULL;
+    new->parent = parent;
+
+    **chain = new;
+    *chain = &new->next;
+}
+
+/**
+ * add label in root entry with label_t structure.
+ * in almost case, there is one root label entry.
+ * ie. label head and tail has same pointer value.
+ *
+ * @param [IN]  fs  DOS_FS structure pointer
+ * @param [IN]  label   root label to add
+ * @param [IN/OUT]  head    root label's head pointer
+ * @param [IN/OUT]  tail    root label's tail pointer
+ */
+void add_label(DOS_FILE *label, label_t **head, label_t **last)
+{
+    label_t *new = NULL;
+
+    new = alloc(sizeof(label_t));
+    new->file = label;
+    new->next = NULL;
+    new->flag = LABEL_FLAG_NONE;
+
+    if ((*last)) {
+        (*last)->next = new;
+    }
+    else {
+        *head = new;
+    }
+
+    *last = new;
+
+    /* check bad volume label in root entry */
+    if (check_root_label((char *)label->dir_ent.name)) {
+        new->flag = LABEL_FLAG_BAD;
+    }
+}
+
+/**
+ */
+void del_label(label_t *label, label_t **prev, label_t **head, label_t **last)
+{
+    if (prev)
+        (*prev)->next = label->next;
+
+    if ((*head) == label)
+        *head = label->next;
+
+    if ((*last) == label) {
+        if (prev) {
+            *last = *prev;
+        } else {
+            *last = NULL;
+        }
+    }
+    free(label);
+}
+
+void clean_label(label_t **head, label_t **last)
+{
+    label_t *this;
+
+    while (*head) {
+        this = (*head);
+        (*head) = (*head)->next;
+
+        if (this == (*last))
+            (*last) = NULL;
+
+        free(this);
+    }
+}
+
+void write_root_label(DOS_FS *fs, char *label, label_t **head, label_t **last)
+{
+    DIR_ENT de;
+    off_t offset;
+    struct tm *ctime;
+    time_t current;
+
+    time(&current);
+    ctime = localtime(&current);
+
+    if (memcmp(label, LABEL_NONAME, LEN_VOLUME_LABEL) == 0) {
+        /* do not need to set root label entry */
+        return;
+    }
+
+    /* there's no volume label in root entry */
+    if (!(*head)) {
+        DOS_FILE **chain = NULL;
+        DOS_FILE *walk = NULL;
+        DOS_FILE *prev = NULL;
+
+        /* add_new_label() */
+
+        offset = alloc_rootdir_entry(fs, &de, NULL);
+        memcpy(de.name, label, LEN_VOLUME_LABEL);
+        chain = &root->first;
+
+        /* find last chain of root entry */
+        for (walk = root->first; walk; walk = walk->next) {
+            chain = &walk->next;
+            prev = walk;
+        }
+        add_label_entry(fs, &chain, root, offset, &de);
+        add_label(prev->next, head, last);
+
+        /**/
+    }
+    else {
+        DOS_FILE *walk = (*head)->file;
+
+        offset = walk->offset;
+        memcpy(&de, &walk->dir_ent, sizeof(de));
+        (*head)->flag = LABEL_FLAG_NONE;
+    }
+
+    memcpy(de.name, label, LEN_VOLUME_LABEL);
+    /* for KANJI lead byte of japanese,
+     * TODO: check other place to apply this */
+    if (de.name[0] == 0xe5)
+        de.name[0] = 0x05;
+
+    de.attr = ATTR_VOLUME;
+    de.time = CT_LE_W((unsigned short)((ctime->tm_sec >> 1) +
+                (ctime->tm_min << 5) + (ctime->tm_hour << 11)));
+    de.date = CT_LE_W((unsigned short)(ctime->tm_mday +
+                ((ctime->tm_mon + 1) << 5) +
+                ((ctime->tm_year - 80) << 9)));
+    de.ctime_ms = 0;
+    de.ctime = de.time;
+    de.cdate = de.date;
+    de.adate = de.date;
+    de.starthi = 0;
+    de.start = 0;
+    de.size = 0;
+
+    fs_write(offset, sizeof(DIR_ENT), &de);
+}
+
+void write_boot_label(DOS_FS *fs, char *label)
+{
+    struct boot_sector b;
+    struct boot_sector_16 b16;
+
+    if (fs->fat_bits == 12 || fs->fat_bits == 16) {
+        fs_read(0, sizeof(b16), &b16);
+        if (b16.extended_sig != 0x29) {
+            b16.extended_sig = 0x29;
+            b16.serial = 0;
+            memcpy(b16.fs_type,
+                    fs->fat_bits == 12 ? "FAT12   " : "FAT16   ", 8);
+        }
+        memcpy(b16.label, label, LEN_VOLUME_LABEL);
+        fs_write(0, sizeof(b16), &b16);
+    }
+    else if (fs->fat_bits == 32) {
+        fs_read(0, sizeof(b), &b);
+        if (b.extended_sig != 0x29) {
+            b.extended_sig = 0x29;
+            b.serial = 0;
+            memcpy(b.fs_type, "FAT32   ", 8);
+        }
+        memcpy(b.label, label, LEN_VOLUME_LABEL);
+        fs_write(0, sizeof(b), &b);
+
+        if (fs->backupboot_start)
+            fs_write(fs->backupboot_start, sizeof(b), &b);
+    }
+}
+
+/**
+ * write boot and root label.
+ * if this function is called from remove_label,
+ * (parameter 'label' value is LABEL_NONAME)
+ * set root label in cast just only it already exist.
+ * (do not allocate root label entry to set LABEL_NONAME)
+ *
+ * @param[IN]   label   label string to set root/boot
+ */
+void write_label(DOS_FS *fs, char *label, label_t **head, label_t **last)
+{
+    int len = 0;
+
+    if (!label)
+        return;
+
+    len = strlen(label);
+    while (len < LEN_VOLUME_LABEL)
+        label[len++] = ' ';
+
+    write_boot_label(fs, label);
+    write_root_label(fs, label, head, last);
+
+    memcpy(fs->label, label, LEN_VOLUME_LABEL);
+}
+
+
+static void remove_boot_label(DOS_FS *fs)
+{
+    write_boot_label(fs, LABEL_NONAME);
+    memcpy(fs->label, LABEL_NONAME, LEN_VOLUME_LABEL);
+}
+
+/**
+ * @param[IN]   label   root label entry pointer
+ */
+static void remove_root_label(DOS_FILE *label)
+{
+    if (label) {
+        label->dir_ent.name[0] = DELETED_FLAG;
+        label->dir_ent.attr = 0;
+        fs_write(label->offset, sizeof(DIR_ENT), &label->dir_ent);
+    }
+}
+
+/**
+ * remove boot and root label.
+ * if root label exist, set DELETED_FLAG to it.
+ * and set "NO NAME    " to boot label
+ *
+ * @param [IN] label    root label entry pointer to remove
+ */
+void remove_label(DOS_FS *fs, DOS_FILE *label, label_t **head, label_t **last)
+{
+    remove_root_label(label);
+    write_label(fs, LABEL_NONAME, head, last);
+}
+
+/**
+ * scan all of root entries and find root volume entries.
+ * make data structure for root label entries.
+ * this function should be called after scan_root()
+ *
+ * @param [IN]  fs  DOS_FS structure pointer
+ * @param [IN/OUT]  head    root label's head pointer
+ * @param [IN/OUT]  tail    root label's tail pointer
+ * */
+void scan_volume_entry(DOS_FS *fs, label_t **head, label_t **last)
+{
+    DOS_FILE *walk = NULL;
+
+    if (*head && *last) {
+        printf("Already scanned volume label entries\n");
+        return;
+    }
+
+    for (walk = root->first; walk; walk = walk->next) {
+        if (IS_FREE(walk->dir_ent.name) ||
+                IS_LFN_ENT(walk->dir_ent.attr) ||
+                !IS_VOLUME_LABEL(walk->dir_ent.attr)) {
+            continue;
+        }
+
+        /* allocate label_t and set */
+        add_label(walk, head, last);
+    }
+}
+
+/**
+ * check lists for volume label
+ * - if there are volume label more than 2 entries in root, remove except one.
+ * - if root label is not valid, remove it.
+ *   . empty label / label has non-permitted character / label is lower
+ * - after removal of volume label, volume label set to "NO NAME    ".
+ * - volume label should have zero length and zero start cluster number
+ * - use label in root entry (copy root label to boot label),
+ *   if there are different volume label in boot sector and root entry.
+ *
+ * @return  return 0 success, or -1 if an error occurred
+ */
+int check_volume_label(DOS_FS *fs)
+{
+    int ret = 0;
+    char label_temp[LEN_VOLUME_LABEL + 1] = {'\0', };
+    DOS_FILE *walk = NULL;  /* DOS_FILE walk */
+    label_t *lwalk = NULL;  /* label_t walk */
+    label_t **prev = NULL;
+
+    /* find root volume entries and make label_t structure */
+    scan_volume_entry(fs, &label_head, &label_last);
+
+    /* in case that there is no root volume label */
+    if (!label_head) {
+        if (memcmp(fs->label, LABEL_NONAME, LEN_VOLUME_LABEL) == 0) {
+            /* normal case,
+             * TODO: initialize volume label to LABEL_NONAME in mkdosfs */
+            ret = 0;
+            goto exit;
+        }
+        /* check bad volume label in boot sector */
+        if (check_boot_label(fs->label) == -1) {
+            printf("Volume label '%s' in boot sector is not valid.\n",
+                    fs->label);
+            if (interactive)
+                printf("1) Remove invalid boot label\n"
+                        "2) Set new label\n");
+            else
+                printf("  Auto-removing label from boot sector.\n");
+
+            switch (interactive ? get_key("12", "?") : '1') {
+
+                case '1':
+                    remove_label(fs, NULL, &label_head, &label_last);
+                    break;
+                case '2': {
+                    char new_label[LEN_VOLUME_LABEL + 1] = {'\0', };
+
+                    get_label(new_label);
+                    write_label(fs, new_label, &label_head, &label_last);
+                    break;
+                }
+            }
+        }
+        else {
+            printf("Label in boot is '%s', "
+                    "but there is no label in root directory.\n",
+                    fs->label);
+
+            if (interactive)
+                printf("1) Remove root label\n"
+                        "2) Copy boot label to root label entry\n");
+            else
+                printf("  Auto-removing label from boot sector.\n");
+
+            switch (interactive ? get_key("12", "?") : '1') {
+                case '1':
+                    remove_label(fs, NULL, &label_head, &label_last);
+                    break;
+                case '2':
+                    /* write root label */
+                    write_root_label(fs, fs->label, &label_head, &label_last);
+            }
+        }
+
+        ret = 0;
+        goto exit;
+    }
+
+    walk = NULL;
+    /* handle multiple root volume label */
+    if (label_head && label_head != label_last) {
+        int idx = 0;
+        int choose = 0;
+
+        printf("Multiple volume label in root\n");
+        for (lwalk = label_head; lwalk; lwalk = lwalk->next) {
+            walk = lwalk->file;
+            memcpy(label_temp, walk->dir_ent.name, LEN_VOLUME_LABEL);
+            printf("  %d - %s\n", idx + 1, label_temp);
+            idx++;
+        }
+
+        if (interactive)
+            printf("1) Remove all label\n"
+                    "2) Auto Select one label(first)\n"
+                    "3) Select one label to leave\n");
+        else
+            printf("  Auto-removing label%s in root entry except one\n",
+                    idx > 1 ? "s" : "");
+
+        switch (interactive ? get_key("123", "?") : '2') {
+            case '1':
+                prev = NULL;
+                for (lwalk = label_head; lwalk;) {
+                    remove_root_label(lwalk->file);
+                    /* lwalk/label_head/label_last might change in del_label */
+                    del_label(lwalk, prev, &label_head, &label_last);
+                    lwalk = label_head;
+                }
+
+                remove_boot_label(fs);
+                goto exit;
+
+            case '2':
+                walk = label_head->file;
+                memcpy(label_temp, walk->dir_ent.name, LEN_VOLUME_LABEL);
+                printf("  Select first label (%s)\n", label_temp);
+
+                prev = &label_head;
+                for (lwalk = label_head->next; lwalk;) {
+                    remove_root_label(lwalk->file);
+                    /* lwalk/label_head/label_last might change in del_label */
+                    del_label(lwalk, prev, &label_head, &label_last);
+                    lwalk = label_head->next;
+                }
+
+                write_boot_label(fs, label_temp);
+                break;
+            case '3':
+                do {
+                    /* FIXME: max 9 label entries can be selected */
+                    choose = get_key("123456789", "  Select label number : ");
+                    choose -= '0';
+                    if (choose > idx)
+                        printf("  Invalid label index(%d)."
+                                " Select again.(1~%d)\n", choose, idx);
+                } while (choose > idx);
+
+                prev = NULL;
+                for (lwalk = label_head, idx = 1; lwalk; idx++) {
+                    /* do not remove selected label */
+                    if (choose == idx) {
+                        walk = lwalk->file;
+                        prev = &label_head;
+                        lwalk = lwalk->next;
+                        continue;
+                    }
+
+                    remove_root_label(lwalk->file);
+                    /* lwalk freed in del_label */
+                    del_label(lwalk, prev, &label_head, &label_last);
+
+                    if (prev)
+                        lwalk = (*prev)->next;
+                    else
+                        lwalk = label_head;
+                }
+
+                memcpy(label_temp, walk->dir_ent.name, LEN_VOLUME_LABEL);
+                printf("  Selected label (%s)\n", label_temp);
+
+                write_boot_label(fs, label_temp);
+                break;
+        }
+    }
+
+    if (label_head != label_last) {
+        printf("error!!! There are still more than one root label entries\n");
+        ret = -1;
+        goto exit;
+    }
+
+    lwalk = label_head;
+    walk = lwalk->file;
+
+    memcpy(label_temp, walk->dir_ent.name, LEN_VOLUME_LABEL);
+
+    /* handle bad label in root entry */
+    if (lwalk && (lwalk->flag & LABEL_FLAG_BAD)) {
+        printf("Label '%s' in root entry is not valid\n", label_temp);
+        if (interactive)
+            printf("1) Remove invalid root label\n"
+                    "2) Set new label\n");
+        else
+            printf("  Auto-removing label in root entry.\n");
+
+        switch (interactive ? get_key("12", "?") : '1') {
+            case '1':
+                remove_label(fs, lwalk->file, &label_head, &label_last);
+                break;
+            case '2': {
+                char new_label[LEN_VOLUME_LABEL + 1] = {'\0', };
+
+                get_label(new_label);
+                write_label(fs, new_label, &label_head, &label_last);
+                break;
+            }
+        }
+        ret = 0;
+        goto exit;
+    }
+
+    /* handle different volume label in boot and root */
+    if (memcmp(fs->label, label_temp, LEN_VOLUME_LABEL) != 0) {
+        printf("Label '%s' in root entry "
+                "and label '%s' in boot sector are different\n",
+                label_temp, fs->label);
+        if (memcmp(fs->label, LABEL_NONAME, LEN_VOLUME_LABEL) == 0) {
+            printf("Copy label from root entry(%s)\n", label_temp);
+            write_label(fs, label_temp, &label_head, &label_last);
+            ret = 0;
+            goto exit;
+        }
+
+        if (interactive) {
+            printf("1) Copy label from boot to root entry\n"
+                    "2) Copy label from root entry to boot\n");
+        }
+        else {
+            printf("  Auto-copying label from root entry to boot\n");
+        }
+
+        switch (interactive ? get_key("12", "?") : '2') {
+            case '1':
+                write_root_label(fs, fs->label, &label_head, &label_last);
+                break;
+            case '2':
+                write_boot_label(fs, label_temp);
+                memcpy(fs->label, label_temp, LEN_VOLUME_LABEL);
+                break;
+        }
+    }
+
+exit:
+    clean_label(&label_head, &label_last);
+    return ret;
 }
 
 /* Local Variables: */
