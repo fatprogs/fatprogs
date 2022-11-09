@@ -694,6 +694,7 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
             break;
         }
 
+        /* check shared clusters */
         if ((owner = get_owner(fs, curr))) {
             int do_trunc = 0;
             printf("%s  and\n", path_name(owner));
@@ -735,11 +736,12 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
                     (do_trunc == 1 ||
                      (interactive && get_key("12", "?") == '1'))) {
 
+                /* in case of truncating first entry */
                 prev = 0;
-                clusters = 0;
+                clusters2 = 0;
                 for (this = FSTART(owner, fs);
                         this > 0 && this != -1;
-                        this = next_cluster(fs,this)) {
+                        this = next_cluster(fs, this)) {
 
                     if (this == curr) {
                         if (prev)
@@ -748,7 +750,8 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
                             MODIFY_START(owner, 0, fs);
 
                         MODIFY(owner, size,
-                                CT_LE_L((unsigned long long)clusters * fs->cluster_size));
+                                CT_LE_L((unsigned long long)clusters2 *
+                                    fs->cluster_size));
                         if (restart)
                             return 1;
 
@@ -759,7 +762,7 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
                         this = curr;
                         break;
                     }
-                    clusters++;
+                    clusters2++;
                     prev = this;
                 }
 
