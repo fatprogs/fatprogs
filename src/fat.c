@@ -51,7 +51,7 @@ static void init_fat_cache(DOS_FS *fs)
 
     fs->fat_cache.cpc = FAT_CACHE_SIZE / fs->fat_bits * BITS_PER_BYTE;
     fs->fat_cache.first_cpc =
-        (FAT_CACHE_SIZE - fs->fat_cache.diff) / fs->fat_bits * BITS_PER_BYTE;
+        ((FAT_CACHE_SIZE - fs->fat_cache.diff) * BITS_PER_BYTE) / fs->fat_bits;
     fs->fat_cache.last_cpc =
         (max_clus_num - fs->fat_cache.first_cpc) % fs->fat_cache.cpc;
 
@@ -266,7 +266,7 @@ static void read_fat_cache(DOS_FS *fs, uint32_t cluster)
 
     /* munmap for previous memory mapping and mmap new FAT area
      * that include cluster */
-    if (fs->fat_cache.start != -1) {
+    if (fs->fat_cache.addr != NULL) {
         fs_munmap(fs->fat_cache.addr, FAT_CACHE_SIZE);
     }
 
@@ -313,6 +313,10 @@ void get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value)
 
             /* offset in cache */
             offset = ((cluster - fs->fat_cache.start) * clus_size) % FAT_CACHE_SIZE;
+            /* adjust first fat cache offset for unaligned fat_start device */
+            if (cluster < fs->fat_cache.first_cpc)
+                offset += fs->fat_cache.diff;
+
             data = *(uint32_t *)(fs->fat_cache.addr + offset);
 
             /* offset in block device */
