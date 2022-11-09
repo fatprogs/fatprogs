@@ -33,6 +33,9 @@ void *mem_queue = NULL;
 int remain_dirty = 0;   /* Not used : for removing compile error */
 uint32_t max_clus_num;  /* Not used : for removing compile error */
 
+static label_t *label_head;
+static label_t *label_last;
+
 static void usage(int error)
 {
     FILE *f = error ? stderr : stdout;

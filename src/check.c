@@ -32,6 +32,9 @@ static DOS_FILE *find_owner(DOS_FS *fs, uint32_t cluster);
 
 static DOS_FILE *root;
 
+static label_t *label_head;
+static label_t *label_last;
+
 #define DOT_ENTRY       0
 #define DOTDOT_ENTRY    1
 

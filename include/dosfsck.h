@@ -30,9 +30,6 @@ typedef struct _label {
     struct _label *next;
 } label_t;
 
-label_t *label_head;
-label_t *label_last;
-
 extern int interactive, list, verbose, test, write_immed;
 extern int remain_dirty;
 extern int atari_format;
