@@ -125,7 +125,7 @@ void read_fat(DOS_FS *fs)
         if (second_fat && memcmp(first_fat, second_fat, read_size) != 0) {
             if (!first_ok && !second_ok) {
                 printf("Both FATs appear to be corrupt. Giving up.\n");
-                exit(1);
+                exit(EXIT_ERRORS_LEFT);
             }
 
             if (first_ok && !second_ok) {

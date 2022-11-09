@@ -151,7 +151,7 @@ void file_add(char *path, FD_TYPE type)
             *here = 0;
 
         if (!file_cvt((unsigned char *)path, (unsigned char *)name))
-            exit(2);
+            exit(EXIT_OPERATION_ERROR);
 
         for (walk = *current; walk; walk = walk->next) {
             if (!here &&

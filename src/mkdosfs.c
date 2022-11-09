@@ -264,7 +264,7 @@ int atari_format = 0;	/* Use Atari variation of MS-DOS FS format */
 static void fatal_error(const char *fmt_string)
 {
     fprintf(stderr, fmt_string, program_name, device_name);
-    exit (1);       /* The error exit code is 1! */
+    exit(1);        /* The error exit code is 1! */
 }
 
 /* Mark the specified cluster as having a particular value */
@@ -1730,7 +1730,7 @@ int main(int argc, char **argv)
     print_mem();
     write_tables();		/* Write the file system tables away! */
 
-    exit(0);			/* Terminate with no errors! */
+    exit(0);            /* Terminate with no errors! */
 }
 
 /* That's All Folks */

@@ -602,7 +602,7 @@ int main(int argc, char *argv[])
     check_atari(&atari_format);
 
     memcpy(outfile, DUMP_FILENAME, 255);
-    while ((c = getopt(argc, argv, "f:o:v")) != EOF) {
+    while ((c = getopt(argc, argv, "f:o:vh")) != EOF) {
         switch (c) {
             case 'f':
                 fat_num = atoi(optarg);
@@ -621,14 +621,18 @@ int main(int argc, char *argv[])
                 verbose = 1;
                 printf("dosfsdump " VERSION " (" VERSION_DATE ")\n");
                 break;
+            case 'h':
+                usage(argv[0]);
+                exit(EXIT_SUCCESS);
             default:
                 usage(argv[0]);
-                break;
+                exit(EXIT_SYNTAX_ERROR);
         }
     }
 
     if (optind != argc - 1) {
         usage(argv[0]);
+        exit(EXIT_SYNTAX_ERROR);
     }
 
     fd_in = open(argv[optind], O_RDONLY);

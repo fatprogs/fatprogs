@@ -51,7 +51,6 @@ static void usage(char *name)
     fprintf(stderr, "  -V       perform a verification pass\n");
     fprintf(stderr, "  -w       write changes to disk immediately\n");
     fprintf(stderr, "  -y       same as -a, for compat with other *fsck\n");
-    exit(2);
 }
 
 int main(int argc, char **argv)
@@ -116,16 +115,19 @@ int main(int argc, char **argv)
                 break;
             default:
                 usage(argv[0]);
+                exit(EXIT_SYNTAX_ERROR);
         }
     }
 
     if ((test || write_immed) && !rw) {
         fprintf(stderr, "-t and -w require -a or -r\n");
-        exit(2);
+        exit(EXIT_SYNTAX_ERROR);
     }
 
-    if (optind != argc - 1)
+    if (optind != argc - 1) {
         usage(argv[0]);
+        exit(EXIT_SYNTAX_ERROR);
+    }
 
     printf("dosfsck " VERSION ", " VERSION_DATE ", FAT32, LFN\n");
     fs_open(argv[optind], rw);
@@ -152,7 +154,7 @@ int main(int argc, char **argv)
             else {
                 if (verify)
                     printf("  Filesystem dirty flag is clean. exit!\n");
-                exit(0);
+                exit(EXIT_NO_ERRORS);
             }
         }
 

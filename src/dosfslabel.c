@@ -36,10 +36,9 @@ uint32_t max_clus_num;  /* Not used : for removing compile error */
 static label_t *label_head;
 static label_t *label_last;
 
-static void usage(int error)
+static void usage(int status)
 {
-    FILE *f = error ? stderr : stdout;
-    int status = error ? 1 : 0;
+    FILE *f = status ? stderr : stdout;
 
     fprintf(f, "usage: dosfslabel device [label]\n");
     exit(status);
@@ -59,13 +58,13 @@ int main(int argc, char *argv[])
     check_atari(&atari_format);
 
     if (argc < 2 || argc > 3)
-        usage(1);
+        usage(EXIT_FAILURE);
 
     if (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help"))
-        usage(0);
+        usage(EXIT_SUCCESS);
     else if (!strcmp(argv[1], "-V") || !strcmp(argv[1], "--version")) {
         printf("dosfslabel " VERSION ", " VERSION_DATE ", FAT32, LFN\n");
-        exit(0);
+        exit(EXIT_SUCCESS);
     }
 
     device = argv[1];
@@ -74,7 +73,7 @@ int main(int argc, char *argv[])
         if (strlen(label) > 11) {
             fprintf(stderr,
                     "dosfslabel: labels can be no longer than 11 characters\n");
-            exit(1);
+            exit(EXIT_FAILURE);
         }
         rw = 1;
     }
@@ -100,7 +99,7 @@ int main(int argc, char *argv[])
         printf("\n");
 #endif
 
-        exit(0);
+        exit(EXIT_SUCCESS);
     }
 
     scan_root_only(&fs, &label_head, &label_last);
