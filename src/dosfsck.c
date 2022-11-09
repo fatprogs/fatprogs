@@ -200,10 +200,10 @@ int main(int argc, char **argv)
             if (interactive)
                 rw = get_key("yn", "Perform changes ? (y/n)") == 'y';
             else
-                printf("Performing changes.\n");
+                printf("\nPerforming changes.\n");
         }
         else
-            printf("Leaving file system unchanged.\n");
+            printf("\nLeaving file system unchanged.\n");
     }
 
     printf("%s: %u files, %u/%u clusters\n", argv[optind], n_files,

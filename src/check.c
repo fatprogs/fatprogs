@@ -701,7 +701,6 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
     }
 
     clusters = prev = 0;
-    /* TODO: calling once instead of calling next_cluster() / get_fat() */
     for (curr = FSTART(file, fs) ? FSTART(file, fs) : -1;
             curr != -1; curr = next_clus) {
 
@@ -1314,7 +1313,8 @@ static int subdirs(DOS_FS *fs, DOS_FILE *parent, FDSC **cp)
         }
         else if (!IS_FILE(walk->dir_ent.attr) &&
                 !IS_VOLUME_LABEL(walk->dir_ent.attr)) {
-            printf("%s\n  Invalid directory entry.(%d)\n"
+            printf("%s\n  Invalid attribute."
+                    " Can't determine entry as file or dir.(%d)\n"
                     "  Not auto-correcting this.\n",
                     path_name(walk), walk->dir_ent.attr);
             remain_dirty = 1;
@@ -1434,7 +1434,7 @@ int check_valid_label(char *label)
     /* check bad character based on long file name specification */
     for (i = 0; i < len; i++) {
         if ((unsigned char)label[i] < 0x20) {
-            printf("label has character less than 0x20\n");
+            printf("Label has character less than 0x20\n");
             return -1;
         }
         else if (label[i] == 0x22 || label[i] == 0x2A ||
@@ -1442,7 +1442,7 @@ int check_valid_label(char *label)
                 label[i] == 0x3A || label[i] == 0x3C ||
                 label[i] == 0x3E || label[i] == 0x3F ||
                 label[i] == 0x5C || label[i] == 0x7C) {
-            printf("label has illegal character\n");
+            printf("Label has illegal character\n");
             return -1;
         }
     }
@@ -2007,7 +2007,7 @@ int check_volume_label(DOS_FS *fs)
             printf("1) Copy label from root entry to boot\n"
                     "2) Set new label\n");
         else
-            printf("  Auto-copying label from root entry.\n");
+            printf("  Auto-copying label from root entry to boot.\n");
 
         switch (interactive ? get_key("12", "?") : '1') {
             case '1':
@@ -2346,11 +2346,13 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
     if (interactive) {
         printf("1) Drop '%s' entry\n"
                 "2) Drop parent entry\n"
-                "3) Add dots entry to newly allocated cluster's %s slot\n",
-                file_name(de->name), (dots == DOT_ENTRY) ? "first" : "second");
+                "3) Allocate new cluster and add %s entry at %s slot\n",
+                file_name(de->name),
+                (dots == DOT_ENTRY) ? "dot('.')" : "dotdot('..')",
+                (dots == DOT_ENTRY) ? "first" : "second");
     }
     else
-        printf("  Auto-adding %s entry to newly allocated cluster's %s slot.\n",
+        printf("  Auto-adding. Allocate new cluster and add %s entry at %s slot.\n",
                 (dots == DOT_ENTRY) ? "dot('.')" : "dotdot('..')",
                 (dots == DOT_ENTRY) ? "first" : "second");
 
@@ -2408,7 +2410,8 @@ int check_dirty_flag(DOS_FS *fs)
     return 0;
 }
 
-/* called after fs_flush, must do not use fs_write(). */
+/* called after fs_flush, must do not use fs_write().
+ * and fs_unmap() should be called after this function. */
 void clean_dirty_flag(DOS_FS *fs)
 {
     uint32_t value;
