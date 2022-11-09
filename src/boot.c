@@ -208,6 +208,7 @@ static void check_backup_boot(DOS_FS *fs, struct boot_sector *b, int lss)
 
 static void init_fsinfo(struct fsinfo_sector *fsinfo)
 {
+    memset(fsinfo, 0, sizeof(struct fsinfo_sector));
     fsinfo->magic = CT_LE_L(LEAD_SIGN);
     fsinfo->signature = CT_LE_L(STRUCT_SIGN);
     fsinfo->free_clusters = CT_LE_L(-1);

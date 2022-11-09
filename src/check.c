@@ -210,8 +210,10 @@ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
 
         /* if pattern is NULL, then just allocate root entry
          * and do not fill DIR_ENT structure */
-        if (!pattern)
+        if (!pattern) {
+            free_mem(root_ent);
             return offset;
+        }
 
         /* make entry using pattern */
         while (1) {
@@ -457,8 +459,10 @@ static int find_lfn(DOS_FS *fs, DOS_FILE *parent, DOS_FILE *file)
         while (clus_num > 0 && clus_num != -1) {
             fs_read(off, sizeof(DIR_ENT), &de);
             if (!IS_LFN_ENT(de.attr) && !IS_VOLUME_LABEL(de.attr)) {
-                file->offset = off;
-                memcpy(&file->dir_ent, &de, sizeof(DIR_ENT));
+                if (!file->offset) {
+                    file->offset = off;
+                    memcpy(&file->dir_ent, &de, sizeof(DIR_ENT));
+                }
                 break;
             }
 
@@ -1155,7 +1159,7 @@ static void add_file(DOS_FS *fs, DOS_FILE ***chain, DOS_FILE *parent,
         loff_t offset, FDSC **cp)
 {
     DOS_FILE *new;
-    DIR_ENT de;
+    DIR_ENT de = {0, };
     FD_TYPE type;
     int rename_flag = 0;
 

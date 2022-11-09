@@ -453,7 +453,7 @@ retry:
     }
 
     fs->fat_start = (off_t)reserved_cnt * sector_size;
-    fs->root_start = fs->fat_start + (b->nfats * sec_per_fat * sector_size);
+    fs->root_start = fs->fat_start + (b->nfats * (off_t)sec_per_fat * sector_size);
     fs->root_entries = GET_UNALIGNED_W(b->dir_entries);
     fs->data_start = fs->root_start +
         ROUND_TO_MULTIPLE(fs->root_entries << MSDOS_DIR_BITS, sector_size);

@@ -906,9 +906,7 @@ static void setup_tables(void)
              * 12 bit FAT. */
             if (clust16 < FAT12_THRESHOLD && !(size_fat_by_user && fat_bits == 16)) {
                 if (verbose >= 2)
-                    printf(clust16 < FAT12_THRESHOLD ?
-                            "FAT16: would be misdetected as FAT12\n" :
-                            "FAT16: too much clusters\n");
+                    printf("FAT16: would be misdetected as FAT12\n");
                 clust16 = 0;
             }
 

@@ -224,8 +224,8 @@ void print_changes(void)
 
         if ((walk->pos >= next->pos) || (walk->pos + walk->size > next->pos)) {
             print_flag = 1;
-            printf("\n%5d : pos %8ld, size %8d", i, walk->pos, walk->size);
-            printf("\n%5d : pos %8ld, size %8d\n", i + 1, next->pos, next->size);
+            printf("\n%5d : pos %8ld, size %8d", i, (long)walk->pos, walk->size);
+            printf("\n%5d : pos %8ld, size %8d\n", i + 1, (long)next->pos, next->size);
         }
     }
 
@@ -256,6 +256,7 @@ void fs_write(loff_t pos, int size, void *data)
     if (write_immed) {
         did_change = 1;
         fs_write_immed(pos, size, data);
+        return;
     }
 
     new = alloc_mem(sizeof(CHANGE));
@@ -304,9 +305,12 @@ void fs_write(loff_t pos, int size, void *data)
                 del_change_list(new, walk);
 
                 free_change(walk);
-
                 /* walk->next's area also may be overlapped by new. Check next. */
-                continue;
+                if (new->next && new->next->pos < new->pos + new->size) {
+                    walk = new;
+                    continue;
+                }
+                break;
             }
             /* new : |--------|
              * walk: |----------------|
@@ -410,7 +414,7 @@ void *fs_mmap(void *addr, off_t offset, int length)
     void *ret_addr = NULL;
 
     ret_addr = mmap(addr, length, PROT_READ, MAP_SHARED | MAP_POPULATE, fd, offset);
-    if (ret_addr < 0) {
+    if (ret_addr == NULL) {
         pdie("mmap %ld offset failed", offset);
     }
 

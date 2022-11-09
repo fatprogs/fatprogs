@@ -763,8 +763,8 @@ uint32_t update_free(DOS_FS *fs)
                 fs->clusters, alloc_clusters, free, bad_clusters);
     }
 
-    if (fs->free_clusters >= 0) {
-        if (fs->free_clusters == -1) {
+    if ((int32_t)fs->free_clusters >= 0) {
+        if ((int32_t)fs->free_clusters == -1) {
             printf("Free cluster summary is not initialized\n");
         }
 

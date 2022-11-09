@@ -108,10 +108,6 @@ int file_cvt(unsigned char *name, unsigned char *fixed)
                 c = c * 8 + *name++ - '0';
             }
 
-            if (cnt < 4) {
-                printf("Expected three octal digits.\n");
-                return 0;
-            }
             name += 3;
         }
 
