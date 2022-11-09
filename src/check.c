@@ -26,6 +26,9 @@ void scan_volume_entry(DOS_FS *fs, label_t **head, label_t **last);
 
 static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots);
 static int add_dot_entries(DOS_FS *fs, DOS_FILE *parent, int dots);
+static int check_file_owner(DOS_FS *fs, DOS_FILE *walk, uint32_t cluster,
+        int cnt);
+static DOS_FILE *find_owner(DOS_FS *fs, uint32_t cluster);
 
 static DOS_FILE *root;
 
@@ -68,7 +71,6 @@ static DOS_FILE *root;
         }									\
     } while(0)
 
-
 loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
 {
     static int curr_num = 0;
@@ -110,18 +112,25 @@ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
 
             /* find free cluster */
             for (clu_num = prev + 1; clu_num != prev; clu_num++) {
-                if (clu_num >= fs->clusters + 2)
-                    clu_num = 2;
-                if (!fs->fat[clu_num].value)
+                uint32_t value;
+
+                if (clu_num >= fs->clusters + FAT_START_ENT)
+                    clu_num = FAT_START_ENT;
+
+                get_fat(fs, clu_num, &value);
+                if (!value)
                     break;
             }
 
             if (clu_num == prev)
                 die("Root directory full and no free cluster");
 
+            /* Don't set bitmap, don't increase alloc_clusters for prev. */
+            /* Don't set bitmap, because this function only called
+             * in reclaim routine. Just increase alloc_clusters for clu_num. */
             set_fat(fs, prev, clu_num);
             set_fat(fs, clu_num, -1);
-            set_owner(fs, clu_num, get_owner(fs, fs->root_cluster));
+            inc_alloc_cluster();
 
             /* clear new cluster */
             memset(&d2, 0, sizeof(d2));
@@ -365,7 +374,8 @@ static void drop_file(DOS_FS *fs, DOS_FILE *file)
     uint32_t cluster;
     int skip_set_owner = 0;
 
-    /* when drop ".", ".." entry, should not change onwer of those entries */
+    /* dropping file's ".", ".." entry should not change bitmap of
+     * those entries */
     if (strncmp((char *)file->dir_ent.name, MSDOS_DOT, LEN_FILE_NAME) ||
             strncmp((char *)file->dir_ent.name, MSDOS_DOTDOT, LEN_FILE_NAME)) {
         skip_set_owner = 1;
@@ -377,7 +387,7 @@ static void drop_file(DOS_FS *fs, DOS_FILE *file)
         for (cluster = FSTART(file, fs);
                 cluster > 0 && cluster < fs->clusters + FAT_START_ENT;
                 cluster = next_cluster(fs, cluster)) {
-            set_owner(fs, cluster, NULL);
+            clear_bitmap_occupied(fs, cluster);
         }
     }
     --n_files;
@@ -394,10 +404,14 @@ static void truncate_file(DOS_FS *fs, DOS_FILE *file, uint32_t clusters)
 
     while (walk > 0 && walk != -1) {
         next = next_cluster(fs, walk);
-        if (deleting)
+        if (deleting) {
             set_fat(fs, walk, 0);
-        else if ((deleting = !--clusters))
+            /* TODO: is it needed calling clear_bitmap_occupied() */
+            clear_bitmap_occupied(fs, walk);
+        }
+        else if ((deleting = !--clusters)) {
             set_fat(fs, walk, -1);
+        }
 
         walk = next;
     }
@@ -588,7 +602,7 @@ static void rename_file(DOS_FS *fs, DOS_FILE *file)
  *  - compare entry size and cluster chain size
  *  - cluster duplication(shared cluster)
  *
- * set onwer field of DOS_FILE structure.
+ * set real_bitmap of DOS_FILE structure.
  *
  *  RETURN VALUE
  *  return 1 if need to restart, in case that already checked directory entry has
@@ -596,16 +610,16 @@ static void rename_file(DOS_FS *fs, DOS_FILE *file)
  */
 static int check_file(DOS_FS *fs, DOS_FILE *file)
 {
-    DOS_FILE *owner;
+    DOS_FILE *owner = NULL;
     int restart;
     uint32_t expect,
              curr,
              this,
              clusters,  /* num. of cluster occupied by 'file' */
              prev,
-             walk,
              clusters2; /* num. of cluster occupied by previous entry
                            shared with same cluster */
+    uint32_t next_clus;
 
     if (file->dir_ent.attr & ATTR_DIR) {
         if (CF_LE_L(file->dir_ent.size)) {
@@ -648,11 +662,12 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
         }
     }
 
-    if (FSTART(file, fs) >= fs->clusters + 2) {
+    if (FSTART(file, fs) >= fs->clusters + FAT_START_ENT) {
         if (file->dir_ent.attr & ATTR_DIR) {
             printf("%s\n  Directory start cluster beyond limit (%u > %u). "
                     "Deleting dir.\n",
-                    path_name(file), FSTART(file, fs), fs->clusters + 1);
+                    path_name(file), FSTART(file, fs),
+                    fs->clusters + FAT_START_ENT - 1);
             remove_lfn(fs, file);
             MODIFY_START(file, 0, fs);
             MODIFY(file, name[0], DELETED_FLAG);
@@ -667,11 +682,19 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
     }
 
     clusters = prev = 0;
+    /* TODO: calling once instead of calling next_cluster() / get_fat() */
+#if 1
     for (curr = FSTART(file, fs) ? FSTART(file, fs) : -1;
             curr != -1; curr = next_cluster(fs, curr)) {
-        if (!fs->fat[curr].value || bad_cluster(fs, curr)) {
+        get_fat(fs, curr, &next_clus);
+#else
+    for (curr = FSTART(file, fs) ? FSTART(file, fs) : -1;
+            curr != -1; curr = next_clus) {
+        next_clus = next_cluster(fs, curr);
+#endif
+        if (!next_clus || FAT_IS_BAD(fs, next_clus)) {
             printf("%s\n  Contains a %s cluster (%u). Assuming EOF.\n",
-                    path_name(file), fs->fat[curr].value ? "bad" : "free", curr);
+                    path_name(file), next_clus ? "bad" : "free", curr);
             if (prev)
                 set_fat(fs, prev, -1);
             else if (!file->offset)
@@ -698,39 +721,24 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
         }
 
         /* check shared clusters */
-        if ((owner = get_owner(fs, curr))) {
+        if (test_bit(curr, fs->real_bitmap)) {
+            /* already bit of curr is set in fs->real_bitmap */
             int do_trunc = 0;
-            printf("%s  and\n", path_name(owner));
-            printf("%s\n  share clusters.\n", path_name(file));
+            printf("%s(second) share other file(first)'s clusters\n",
+                    path_name(file));
             clusters2 = 0;
 
-            for (walk = FSTART(owner, fs); walk > 0 && walk != -1;
-                    walk = next_cluster(fs, walk)) {
-                if (walk == curr)
-                    break;
-                else
-                    clusters2++;
-            }
-
             restart = file->dir_ent.attr & ATTR_DIR;
-            if (!owner->offset) {
-                printf("  Truncating second to %llu bytes because first "
-                        "is FAT32 root dir.\n",
-                        (unsigned long long)clusters * fs->cluster_size);
-                do_trunc = 2;
-            }
-            else if (!file->offset) {
-                printf("  Truncating first to %llu bytes because second "
-                        "is FAT32 root dir.\n",
-                        (unsigned long long)clusters2 * fs->cluster_size);
+
+            if (!file->offset) {
+                printf("  Truncating first because second "
+                        "is FAT32 root dir.\n");
                 do_trunc = 1;
             }
             else if (interactive)
-                printf("1) Truncate first to %llu bytes%s\n"
-                        "2) Truncate second to %llu bytes\n",
-                        (unsigned long long)clusters2 * fs->cluster_size,
-                        restart ? " and restart" : "",
-                        (unsigned long long)clusters * fs->cluster_size);
+                printf("1) Truncate first file%s\n"
+                        "2) Truncate second file\n",
+                        restart ? " and restart" : "");
             else
                 printf("  Truncating second to %llu bytes.\n",
                         (unsigned long long)clusters * fs->cluster_size);
@@ -738,6 +746,21 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
             if (do_trunc != 2 &&
                     (do_trunc == 1 ||
                      (interactive && get_key("12", "?") == '1'))) {
+
+                owner = find_owner(fs, curr);
+                if (!owner)
+                    die("Cluster bitmap is set,"
+                            " but bitmap's owner doesn't exist\n");
+
+                if (!owner->offset) {
+                    printf("  Selected to truncate first file(%s), "
+                            "but first is FAT32 root dir.\n"
+                            "  So truncating second(%s) to %llu bytes.\n",
+                            path_name(owner), path_name(file),
+                            (unsigned long long)clusters * fs->cluster_size);
+                    do_trunc = 2;
+                    goto truncate_second;
+                }
 
                 /* in case of truncating first entry */
                 prev = 0;
@@ -748,6 +771,7 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
 
                     if (this == curr) {
                         if (prev)
+                            /* TODO: check bitmap */
                             set_fat(fs, prev, -1);
                         else
                             MODIFY_START(owner, 0, fs);
@@ -759,7 +783,9 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
                             return 1;
 
                         while (this > 0 && this != -1) {
-                            set_owner(fs, this, NULL);
+                            /* TODO: check bitmap */
+                            set_fat(fs, this, 0);
+                            clear_bitmap_occupied(fs, this);
                             this = next_cluster(fs, this);
                         }
                         this = curr;
@@ -773,7 +799,9 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
                     die("Internal error: didn't find cluster %d in chain"
                             " starting at %d", curr, FSTART(owner, fs));
             }
+            /* truncate second */
             else {
+truncate_second:
                 if (prev)
                     set_fat(fs, prev, -1);
                 else
@@ -781,7 +809,7 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
                 break;
             }
         }
-        set_owner(fs, curr, file);
+        set_bitmap_occupied(fs, curr);
         clusters++;
         prev = curr;
     }
@@ -813,7 +841,7 @@ static int check_files(DOS_FS *fs, DOS_FILE *start)
 }
 
 /*
- * root : first entry of parent
+ * param root : first entry of parent
  *
  * check bad name of sibling entires,
  * check duplicate entries,
@@ -969,19 +997,28 @@ static int check_dir(DOS_FS *fs, DOS_FILE **root, int dots)
  * Set cluster owner to 'file' entry to check circular chain.
  * After check reset owner to NULL.
  */
-static void test_file(DOS_FS *fs, DOS_FILE *file, int read_test)
+
+/* 1. check file's cluster already set in real_bitmap
+ * 2. if it is, check whether file has that cluster.
+ *    if not, set bit in real_bitmap
+ * 3. if file already has that clsuter(circular chain),
+ *    broken circular chain. if not(ie. other file's cluster),
+ *    do nothing. check other place */
+
+static void check_file_chain(DOS_FS *fs, DOS_FILE *file, int read_test)
 {
-    DOS_FILE *owner;
-    uint32_t walk, prev, clusters, next_clu;
+    uint32_t curr, prev, clusters, next;
 
     prev = clusters = 0;
-    for (walk = FSTART(file, fs);
-            walk > 0 && walk < fs->clusters + 2;
-            walk = next_clu) {
+    for (curr = FSTART(file, fs);
+            curr > 0 && curr < fs->clusters + FAT_START_ENT;
+            curr = next) {
 
-        next_clu = next_cluster(fs, walk);
-        if ((owner = get_owner(fs, walk))) {
-            if (owner == file) {
+        next = next_cluster(fs, curr);
+
+        /* check if bit of curr is set in fs->real_bitmap */
+        if (test_bit(curr, fs->real_bitmap)) {
+            if (check_file_owner(fs, file, curr, clusters)) {
                 printf("%s\n  Circular cluster chain. "
                         "Truncating to %u cluster%s.\n",
                         path_name(file), clusters, clusters == 1 ? "" : "s");
@@ -996,61 +1033,78 @@ static void test_file(DOS_FS *fs, DOS_FILE *file, int read_test)
             break;
         }
 
-        if (bad_cluster(fs, walk))
+        if (bad_cluster(fs, curr))
             break;
 
         if (!read_test) {
-            /* keep cluster walk */
-            prev = walk;
+            /* keep cluster curr */
+            prev = curr;
             clusters++;
         }
         else { /* if (read_test) */
-            if (fs_test(cluster_start(fs, walk), fs->cluster_size)) {
-                prev = walk;
+            if (fs_test(cluster_start(fs, curr), fs->cluster_size)) {
+                prev = curr;
                 clusters++;
             }
             else {
                 printf("%s\n  Cluster %u (%u) is unreadable. Skipping it.\n",
-                        path_name(file), clusters, walk);
+                        path_name(file), clusters, curr);
                 if (prev)
-                    set_fat(fs, prev, next_cluster(fs, walk));
+                    set_fat(fs, prev, next_cluster(fs, curr));
                 else
-                    MODIFY_START(file, next_cluster(fs, walk), fs);
+                    MODIFY_START(file, next_cluster(fs, curr), fs);
 
-                set_fat(fs, walk, -2);
+                set_fat(fs, curr, -2);
+                clear_bitmap_occupied(fs, curr);
             }
         }
-        set_owner(fs, walk, file);
+        set_bitmap_occupied(fs, curr);
     }
 
-    for (walk = FSTART(file, fs); walk > 0 && walk < fs->clusters + 2;
-            walk = next_cluster(fs, walk)) {
-        if (bad_cluster(fs, walk))
+    for (curr = FSTART(file, fs);
+            curr > 0 && curr < fs->clusters + FAT_START_ENT;
+            curr = next_cluster(fs, curr)) {
+
+        if (!clusters--)
             break;
-        else if (get_owner(fs, walk) == file)
-            set_owner(fs, walk, NULL);
-        else
-            break;
+
+        clear_bitmap_occupied(fs, curr);
     }
 }
 
 static void undelete(DOS_FS *fs, DOS_FILE *file)
 {
     uint32_t clusters, left, prev, walk;
+    uint32_t value;
 
     clusters = left = (CF_LE_L(file->dir_ent.size) +
             fs->cluster_size - 1) / fs->cluster_size;
-    prev = 0;
-    for (walk = FSTART(file, fs); left && walk >= 2 && walk <
-            fs->clusters + 2 && !fs->fat[walk].value; walk++) {
-        left--;
-        if (prev)
-            set_fat(fs, prev, walk);
-        prev = walk;
-    }
 
-    if (prev)
+    prev = 0;
+    walk = FSTART(file, fs);
+    do {
+        get_fat(fs, walk, &value);
+        if (!value)
+            break;
+
+        left--;
+        if (prev) {
+            /* do not set bitmap, because after calling undelete(),
+             * check_file() set bitmap */
+            set_fat(fs, prev, walk);
+        }
+        prev = walk;
+
+        /* CHECK: original code : walk++ is right? */
+        walk = value;
+    } while (left && walk >= FAT_START_ENT &&
+            walk < fs->clusters + FAT_START_ENT);
+
+    if (prev) {
+        /* do not set bitmap, because undelete() only called
+         * before check_file_chain() */
         set_fat(fs, prev, -1);
+    }
     else
         MODIFY_START(file, 0, fs);
 
@@ -1151,7 +1205,7 @@ static void add_file(DOS_FS *fs, DOS_FILE ***chain, DOS_FILE *parent,
             strncmp((char *)de.name, MSDOS_DOTDOT, MSDOS_NAME) != 0)
         ++n_files;
 
-    test_file(fs, new, test);
+    check_file_chain(fs, new, test);
 }
 
 static int subdirs(DOS_FS *fs, DOS_FILE *parent, FDSC **cp);
@@ -1984,7 +2038,9 @@ static int add_dot_entries(DOS_FS *fs, DOS_FILE *parent, int dots)
     for (new_clus = FAT_START_ENT + 1; new_clus != FAT_START_ENT; new_clus++) {
         if (new_clus >= fs->clusters + FAT_START_ENT)
             new_clus = FAT_START_ENT;
-        if (!fs->fat[new_clus].value)
+
+        get_fat(fs, new_clus, &next_clus);
+        if (!next_clus)
             break;
     }
 
@@ -2027,10 +2083,10 @@ static int add_dot_entries(DOS_FS *fs, DOS_FILE *parent, int dots)
         fs_write(start_offset + i, ent_size, de);
     }
 
-    next_clus = fs->fat[start_clus].value;
+    get_fat(fs, start_clus, &next_clus);
     set_fat(fs, start_clus, new_clus);
     set_fat(fs, new_clus, next_clus);
-    set_owner(fs, new_clus, get_owner(fs, start_clus));
+    set_bitmap_occupied(fs, new_clus);
 
     if (dots == DOT_ENTRY) {
         /* first entry offset */
@@ -2258,7 +2314,7 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
 
 int check_dirty_flag(DOS_FS *fs)
 {
-    FAT_ENTRY fat_2nd;
+    uint32_t value;
     uint32_t dirty_mask;
 
     if (fs->fat_bits == 32) {
@@ -2269,8 +2325,8 @@ int check_dirty_flag(DOS_FS *fs)
     }
 
     /* read second value of FAT that has dirty flag */
-    get_fat(fs, 1, &fat_2nd);
-    if ((fs->fat_state & FAT_STATE_DIRTY) || !(fat_2nd.value & dirty_mask)) {
+    get_fat(fs, 1, &value);
+    if ((fs->fat_state & FAT_STATE_DIRTY) || !(value & dirty_mask)) {
         printf("FAT dirty flag is set.\n"
                 "  Filesystem might be shudowned unexpectedly,\n"
                 "  So filesystem may be corrupted.\n\n");
@@ -2282,7 +2338,7 @@ int check_dirty_flag(DOS_FS *fs)
 
 void clean_dirty_flag(DOS_FS *fs)
 {
-    FAT_ENTRY fat_2nd;
+    uint32_t value;
     uint32_t dirty_mask;
     struct boot_sector b;
     struct volume_info *vi = NULL;
@@ -2298,9 +2354,9 @@ void clean_dirty_flag(DOS_FS *fs)
         vi = &b.oldfat.vi;
     }
 
-    get_fat(fs, 1, &fat_2nd);
+    get_fat(fs, 1, &value);
 
-    if ((fs->fat_state & FAT_STATE_DIRTY) || !(fat_2nd.value & dirty_mask)) {
+    if ((fs->fat_state & FAT_STATE_DIRTY) || !(value & dirty_mask)) {
         if (interactive) {
             printf("1) Clean dity flag\n"
                     "2) Leave it\n");
@@ -2315,8 +2371,8 @@ void clean_dirty_flag(DOS_FS *fs)
                     fs_write(0, sizeof(b), &b);
                 }
 
-                if (!(fat_2nd.value & dirty_mask)) {
-                    set_fat(fs, 1, fat_2nd.value | dirty_mask);
+                if (!(value & dirty_mask)) {
+                    set_fat(fs, 1, value | dirty_mask);
                 }
 
                 fs->fat_state &= ~FAT_STATE_DIRTY;
@@ -2326,6 +2382,78 @@ void clean_dirty_flag(DOS_FS *fs)
         }
     }
 }
+
+static DOS_FILE *__get_owner_subdir(DOS_FS *fs, DOS_FILE *parent,
+        uint32_t cluster)
+{
+    DOS_FILE *walk = NULL;
+    DOS_FILE *owner = NULL;
+
+    for (walk = parent->first; walk; walk = walk->next) {
+        if (check_file_owner(fs, walk, cluster, -1))
+            return walk;
+
+        if (walk->dir_ent.attr & ATTR_DIR) {
+            owner = __get_owner_subdir(fs, walk, cluster);
+            if (owner)
+                return owner;
+        }
+    }
+
+    return NULL;
+}
+
+static int __check_file_owner(DOS_FS *fs, uint32_t start,
+        uint32_t cluster, int cnt)
+{
+    uint32_t walk;
+
+    /* cnt == -1, check cluster to end of file
+     * if not, check cluster to cnt-th cluster of file */
+    for (walk = start; walk != -1; walk = next_cluster(fs, walk)) {
+        if (!cnt--)
+            break;
+        if (cluster == walk)
+            return 1;
+    }
+    return 0;
+}
+
+/* check if file's cluster chain has 'cluster'.
+ * check only from start cluster to 'cnt'-th cluster */
+static int check_file_owner(DOS_FS *fs, DOS_FILE *walk, uint32_t cluster, int cnt)
+{
+    uint32_t curr;
+
+    curr = FSTART(walk, fs) ? FSTART(walk, fs) : -1;
+    if (curr == -1)
+        return 0;
+
+    return __check_file_owner(fs, curr, cluster, cnt);
+
+}
+
+static DOS_FILE *find_owner(DOS_FS *fs, uint32_t cluster)
+{
+    DOS_FILE *walk = NULL;
+    DOS_FILE *owner = NULL;
+
+    for (walk = fs->root_cluster ? root->first : root;
+            walk; walk = walk->next) {
+        if (check_file_owner(fs, walk, cluster, -1))
+            return walk;
+
+        if (walk->dir_ent.attr & ATTR_DIR) {
+            owner = __get_owner_subdir(fs, walk, cluster);
+            if (owner)
+                return owner;
+        }
+    }
+
+    return NULL;
+}
+
+
 
 /* Local Variables: */
 /* tab-width: 8     */

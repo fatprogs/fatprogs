@@ -17,141 +17,237 @@
 #include "io.h"
 #include "check.h"
 #include "fat.h"
+#include "file.h"
 
-static void get_fat_entry(FAT_ENTRY *entry, void *fat, uint32_t cluster, DOS_FS *fs)
+uint32_t alloc_clusters;
+
+int __check_file_owner(DOS_FS *fs, uint32_t start, uint32_t cluster, int cnt);
+void set_exclusive_bitmap(DOS_FS *fs)
 {
-    unsigned char *ptr;
+    unsigned int i;
 
-    switch (fs->fat_bits) {
-        case 12:
-            ptr = &((unsigned char *) fat)[cluster * 3 / 2];
-            entry->value = 0xfff & (cluster & 1 ? (ptr[0] >> 4) | (ptr[1] << 4) :
-                    (ptr[0] | ptr[1] << 8));
-            break;
-        case 16:
-            entry->value = CF_LE_W(((unsigned short *)fat)[cluster]);
-            break;
-        case 32:
-            /* According to M$, the high 4 bits of a FAT32 entry are reserved and
-             * are not part of the cluster number. So we cut them off. */
-            {
-                uint32_t e = CF_LE_L(((unsigned int *)fat)[cluster]);
-                entry->value = e & 0xfffffff;
-                entry->reserved = e >> 28;
-            }
-            break;
-        default:
-            die("Bad FAT entry size: %d bits.", fs->fat_bits);
+    /* bitmap : read from disk(FAT)
+     * real_bitmap : set by traversing file tree
+     * reclaim_bitmap : not used */
+
+    memcpy(fs->reclaim_bitmap, fs->real_bitmap, fs->bitmap_size);
+
+    /* After exclusive OR operation,
+     * remained bits represent orphaned clusters */
+    for (i = 0; i < (fs->bitmap_size / sizeof(long)); i++) {
+        fs->real_bitmap[i] ^= fs->bitmap[i];
     }
 
-    entry->owner = NULL;
+    memcpy(fs->bitmap, fs->reclaim_bitmap, fs->bitmap_size);
+    memset(fs->reclaim_bitmap, 0, fs->bitmap_size);
+
+    /* bitmap : real_bitmap backup
+     * real_bitmap : orphan clusters set
+     * reclaim_bitmap : zero cleared for reclaimed cluster */
 }
 
-/*
- * allocate FAT_ENTRY array in DOS_FS,
- * read first/second FAT and compare both.
- * check cluster out of range and set it free
- */
 void read_fat(DOS_FS *fs)
 {
-    int eff_size;
-    uint32_t i;
-    void *first, *second = NULL;
-    int first_ok, second_ok;
+    int fat_size;
+    int read_size;
+    loff_t offset = 0;
+    int remain_size;
+    int bitmap_size;
+    int first_ok;
+    int second_ok;
+    int cpr;    /* number of cluster per read size */
+    int total_cluster = 0;
+    fat_select_t flag = FAT_NONE;
+    char *first_fat = NULL;
+    char *second_fat = NULL;
+    uint32_t clus_num;
+    uint32_t start = FAT_START_ENT; /* skip 0, 1-th cluster of FAT */
 
-    /* 2 == FAT_START_ENT */
-    eff_size = ((fs->clusters + 2ULL) * fs->fat_bits + 7) / 8ULL;
-    first = alloc_mem(eff_size);
-    fs_read(fs->fat_start, eff_size, first);
+    /* 2 represent FAT_START_ENT */
+    fat_size = ((fs->clusters + 2ULL) * fs->fat_bits + 7) / BITS_PER_BYTE;
+    fs->bitmap_size = bitmap_size = (fat_size + 7) / BITS_PER_BYTE;
+
+    read_size = min(DEFAULT_FAT_BUF, fat_size);
+    first_fat = alloc_mem(read_size);
+    if (fs->nfats > 1) {
+        second_fat = alloc_mem(read_size);
+    }
+    remain_size = fat_size;
 
     /* TODO: handle in case that fs->nfats is bigger than 2 */
     if (fs->nfats > 2) {
         printf("Not support filesystem that have more than 2 FATs\n");
-        exit(1);
     }
 
-    if (fs->nfats > 1) {
-        second = alloc_mem(eff_size);
-        fs_read(fs->fat_start + fs->fat_size, eff_size, second);
-    }
+    /* make bitmap from selected FAT */
+    fs->bitmap = qalloc(&mem_queue, bitmap_size);
+    fs->real_bitmap = qalloc(&mem_queue, bitmap_size);
+    fs->reclaim_bitmap = qalloc(&mem_queue, bitmap_size);
 
-    if (second && memcmp(first, second, eff_size) != 0) {
-        FAT_ENTRY first_media, second_media;
+    /* read FAT with DEFALUT_FAT_BUF size for memory optimization */
+    while (remain_size > 0) {
+        int i;
 
-        get_fat_entry(&first_media, first, 0, fs);
-        get_fat_entry(&second_media, second, 0, fs);
-        first_ok = (first_media.value & FAT_EXTD(fs)) == FAT_EXTD(fs);
-        second_ok = (second_media.value & FAT_EXTD(fs)) == FAT_EXTD(fs);
+        fs_read(fs->fat_start + offset, read_size, first_fat);
 
-        if (first_ok && !second_ok) {
-            printf("FATs differ - using first FAT.\n");
-            fs_write(fs->fat_start + fs->fat_size, eff_size, first);
+        if (second_fat) {
+            fs_read(fs->fat_start + fs->fat_size + offset,
+                    read_size, second_fat);
         }
 
-        if (!first_ok && second_ok) {
-            printf("FATs differ - using second FAT.\n");
-            fs_write(fs->fat_start, eff_size, second);
-            memcpy(first, second, eff_size);
+        /* in case of first FAT read */
+        if (offset == 0) {
+            uint32_t value;
+            uint32_t value2;
+
+            get_fat(fs, FAT_FIRST, &value);
+            get_fat(fs, FAT_SECOND, &value2);
+
+            first_ok = (value & FAT_EXTD(fs)) == FAT_EXTD(fs);
+            second_ok = (value2 & FAT_EXTD(fs)) == FAT_EXTD(fs);
         }
 
-        if (first_ok && second_ok) {
-            if (interactive) {
-                printf("FATs differ but appear to be intact. Use which FAT ?\n"
-                        "1) Use first FAT\n"
-                        "2) Use second FAT\n");
-                if (get_key("12", "?") == '1') {
-                    fs_write(fs->fat_start + fs->fat_size, eff_size, first);
-                } else {
-                    fs_write(fs->fat_start, eff_size, second);
-                    memcpy(first, second, eff_size);
+        if (second_fat && memcmp(first_fat, second_fat, read_size) != 0) {
+            if (!first_ok && !second_ok) {
+                printf("Both FATs appear to be corrupt. Giving up.\n");
+                exit(1);
+            }
+
+            if (first_ok && !second_ok) {
+                if (flag == FAT_NONE)
+                    printf("FATs differ - using first FAT.\n");
+                flag = FAT_FIRST;
+            }
+
+            if (!first_ok && second_ok) {
+                if (flag == FAT_NONE)
+                    printf("FATs differ - using second FAT.\n");
+                flag = FAT_SECOND;
+            }
+
+            if (first_ok && second_ok) {
+                if (flag == FAT_NONE) {
+                    if (interactive) {
+                        printf("FATs differ but appear to be intact. "
+                                "Use which FAT ?\n"
+                                "1) Use first FAT\n"
+                                "2) Use second FAT\n");
+                        if (get_key("12", "?") == '1') {
+                            flag = FAT_FIRST;
+                        } else {
+                            flag = FAT_SECOND;
+                        }
+                    }
+                    else {
+                        printf("FATs differ but appear to be intact. "
+                                "Using first FAT.\n");
+                        flag = FAT_FIRST;
+                    }
                 }
             }
+
+            if (flag == FAT_SECOND) {
+                /* TODO: how about writing immediately for FAT ?? */
+                fs_write(fs->fat_start + offset, read_size, second_fat);
+
+                /* TODO: memcpy is needed? just point second_fat isn't enough? */
+                memcpy(first_fat, second_fat, read_size);
+            }
             else {
-                printf("FATs differ but appear to be intact. Using first "
-                        "FAT.\n");
-                fs_write(fs->fat_start + fs->fat_size, eff_size, first);
+                /* TODO: how about writing immediately for FAT ?? */
+                fs_write(fs->fat_start + fs->fat_size + offset,
+                        read_size, first_fat);
             }
         }
 
-        if (!first_ok && !second_ok) {
-            printf("Both FATs appear to be corrupt. Giving up.\n");
-            exit(1);
+        cpr = read_size / fs->fat_bits;
+        for (i = start; i < cpr; i++) {
+            get_fat(fs, total_cluster + i, &clus_num);
+            if (!clus_num)
+                continue;
+
+            if (clus_num >= fs->clusters + FAT_START_ENT &&
+                    clus_num < FAT_MIN_BAD(fs)) {
+                printf("Cluster %u out of range (%u > %u). Setting to EOF.\n",
+                        i, clus_num, fs->clusters + FAT_START_ENT - 1);
+                set_fat(fs, total_cluster + i, -1);
+                set_bit(total_cluster + i, fs->bitmap);
+                continue;
+            }
+
+            /* TODO: handling in case that clus_num is bad cluster */
+
+            /* set bitmap only valid cluster */
+            set_bit(total_cluster + i, fs->bitmap);
         }
+
+        start = 0;
+        total_cluster += cpr;
+        offset += read_size;
+
+        remain_size -= read_size;
+        if (remain_size < read_size)
+            read_size = remain_size;
     }
 
-    if (second) {
-        free_mem(second);
+    if (second_fat) {
+        free_mem(second_fat);
     }
 
-    fs->fat = qalloc(&mem_queue, sizeof(FAT_ENTRY) * (fs->clusters + 2ULL));
-    for (i = 0; i < FAT_START_ENT; i++) {
-        get_fat_entry(&fs->fat[i], first, i, fs);
-    }
-
-    for (i = FAT_START_ENT; i < fs->clusters + 2; i++) {
-        get_fat_entry(&fs->fat[i], first, i, fs);
-
-        if (fs->fat[i].value >= fs->clusters + 2 &&
-                (fs->fat[i].value < FAT_MIN_BAD(fs))) {
-            printf("Cluster %u out of range (%u > %u). Setting to EOF.\n",
-                    i, fs->fat[i].value, fs->clusters + 2 - 1);
-            set_fat(fs, i, -1);
-        }
-    }
-
-    free_mem(first);
+    free_mem(first_fat);
 }
 
-void get_fat(DOS_FS *fs, uint32_t cluster, FAT_ENTRY *fatent)
+void get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value)
 {
-    *fatent = fs->fat[cluster];
+    loff_t offset;
+    int clus_size;
+
+    switch (fs->fat_bits) {
+        case 12: {
+            unsigned char data[2];
+
+            clus_size = 2;
+            offset = fs->fat_start + cluster * 3 / 2;
+            fs_read(offset, clus_size, data);
+
+            *value = 0xfff & (cluster & 1 ? (data[0] >> 4) | (data[1] << 4) :
+                    (data[0] | data[1] << 8));
+            break;
+        }
+        case 16: {
+            unsigned short data;
+
+            clus_size = 2;
+            offset = fs->fat_start + cluster * clus_size;
+            fs_read(offset, clus_size, &data);
+
+            *value = CF_LE_W(data);
+            break;
+        }
+        case 32: {
+            uint32_t data;
+
+            clus_size = 4;
+            offset = fs->fat_start + cluster * clus_size;
+            fs_read(offset, clus_size, &data);
+
+            /* According to MS, the high 4 bits of a FAT32 entry are reserved and
+             * are not part of the cluster number. So we cut them off. */
+            data = CF_LE_L(data);
+            *value = data & 0x0fffffff;
+            break;
+        }
+        default:
+            die("Bad FAT entry size: %d bits.", fs->fat_bits);
+    }
 }
 
 void set_fat(DOS_FS *fs, uint32_t cluster, uint32_t new)
 {
     unsigned char data[4];
-    int size;
-    loff_t offs;
+    loff_t offset;
+    int clus_size;
+    int i;
 
     if ((int32_t)new == -1)
         new = FAT_EOF(fs);
@@ -159,106 +255,166 @@ void set_fat(DOS_FS *fs, uint32_t cluster, uint32_t new)
         new = FAT_BAD(fs);
 
     switch (fs->fat_bits) {
+        uint32_t value;
+
         case 12:
-            offs = fs->fat_start + cluster * 3 / 2;
+
+            clus_size = 2;
+            offset = fs->fat_start + cluster * 3 / 2;
+
             if (cluster & 1) {
-                data[0] = ((new & 0xf) << 4) | (fs->fat[cluster - 1].value >> 8);
+                get_fat(fs, cluster - 1, &value);
+
+                data[0] = ((new & 0xf) << 4) | (value >> 8);
                 data[1] = new >> 4;
             }
             else {
+                get_fat(fs, cluster + 1, &value);
+
                 data[0] = new & 0xff;
-                data[1] = (new >> 8) | (cluster == fs->clusters - 1 ? 0 :
-                        (0xff & fs->fat[cluster + 1].value) << 4);
+                data[1] = (new >> 8) |
+                    (cluster == fs->clusters - 1 ? 0 : (0xff & value) << 4);
             }
-            size = 2;
             break;
+
         case 16:
-            offs = fs->fat_start + cluster * 2;
+            clus_size = 2;
+            offset = fs->fat_start + cluster * clus_size;
             *(uint16_t *)data = CT_LE_W(new);
-            size = 2;
             break;
+
         case 32:
-            offs = fs->fat_start + cluster * 4;
-            /* According to M$, the high 4 bits of a FAT32 entry are reserved and
-             * are not part of the cluster number. So we never touch them. */
+            clus_size = 4;
+            offset = fs->fat_start + cluster * clus_size;
+            get_fat(fs, cluster, (uint32_t *)data);
+
+            /* According to MS, the high 4 bits of a FAT32 entry are reserved and
+             * are not part of the cluster number. So we cut them off. */
             *(uint32_t *)data =
-                CT_LE_L((new & 0xfffffff) | (fs->fat[cluster].reserved << 28));
-            size = 4;
+                CT_LE_L((new & 0xfffffff) | (*(uint32_t *)data & 0xf0000000));
             break;
+
         default:
             die("Bad FAT entry size: %d bits.", fs->fat_bits);
     }
 
-    fs->fat[cluster].value = new;
-    fs_write(offs, size, &data);
-    if (fs->nfats > 1) {
-        fs_write(offs + fs->fat_size, size, &data);
+    fs_write(offset, clus_size, &data);
+    for (i = 1; i < fs->nfats; i++) {
+        fs_write(offset + (fs->fat_size * i), clus_size, &data);
     }
 }
 
 int bad_cluster(DOS_FS *fs, uint32_t cluster)
 {
-    return FAT_IS_BAD(fs, fs->fat[cluster].value);
+    uint32_t value;
+
+    get_fat(fs, cluster, &value);
+    return FAT_IS_BAD(fs, value);
 }
 
 uint32_t next_cluster(DOS_FS *fs, uint32_t cluster)
 {
-    uint32_t value;
+    uint32_t next_clus;
 
-    value = fs->fat[cluster].value;
-    if (FAT_IS_BAD(fs, value))
+    get_fat(fs, cluster, &next_clus);
+    if (FAT_IS_BAD(fs, next_clus))
         die("Internal error: next_cluster on bad cluster");
 
-    return FAT_IS_EOF(fs, value) ? -1 : value;
+    return FAT_IS_EOF(fs, next_clus) ? -1 : next_clus;
 }
 
 loff_t cluster_start(DOS_FS *fs, uint32_t cluster)
 {
     return fs->data_start +
-        ((loff_t)cluster - 2) * (unsigned long long)fs->cluster_size;
+        ((loff_t)cluster - FAT_START_ENT) * (unsigned long long)fs->cluster_size;
 }
 
-void set_owner(DOS_FS *fs, uint32_t cluster, DOS_FILE *owner)
+inline void inc_alloc_cluster(void)
 {
-    if (owner && fs->fat[cluster].owner)
-        die("Internal error: attempt to change file owner");
-
-    fs->fat[cluster].owner = owner;
+    alloc_clusters++;
 }
 
-DOS_FILE *get_owner(DOS_FS *fs, uint32_t cluster)
+inline void dec_alloc_cluster(void)
 {
-    return fs->fat[cluster].owner;
+    alloc_clusters--;
+}
+
+inline void set_bitmap_reclaim(DOS_FS *fs, uint32_t cluster)
+{
+    set_bit(cluster, fs->reclaim_bitmap);
+    alloc_clusters++;
+}
+
+inline void clear_bitmap_reclaim(DOS_FS *fs, uint32_t cluster)
+{
+    clear_bit(cluster, fs->reclaim_bitmap);
+    alloc_clusters--;
+}
+
+inline void set_bitmap_occupied(DOS_FS *fs, uint32_t cluster)
+{
+    set_bit(cluster, fs->real_bitmap);
+    set_bit(cluster, fs->bitmap);
+    alloc_clusters++;
+}
+
+inline void clear_bitmap_occupied(DOS_FS *fs, uint32_t cluster)
+{
+    clear_bit(cluster, fs->real_bitmap);
+    clear_bit(cluster, fs->bitmap);
+    alloc_clusters--;
 }
 
 void fix_bad(DOS_FS *fs)
 {
     uint32_t i;
+    uint32_t next_clus;
 
     if (verbose)
         printf("Checking for bad clusters.\n");
 
-    for (i = 2; i < fs->clusters + 2; i++) {
-        if (!get_owner(fs, i) && !FAT_IS_BAD(fs, fs->fat[i].value))
+    /* use reclaim_bitmap to check bad cluster in this function temporarily */
+    memcpy(fs->reclaim_bitmap, fs->real_bitmap, fs->bitmap_size);
+
+    for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
+        if (test_bit(i, fs->reclaim_bitmap)) {
+            continue;
+        }
+
+        get_fat(fs, i, &next_clus);
+        if (!FAT_IS_BAD(fs, next_clus)) {
             if (!fs_test(cluster_start(fs, i), fs->cluster_size)) {
                 printf("Cluster %u is unreadable.\n", i);
                 set_fat(fs, i, -2);
+                /* TODO: check if clear_occupied is needed */
+                clear_bitmap_occupied(fs, i);
             }
+        }
     }
+
+    memset(fs->reclaim_bitmap, 0, fs->bitmap_size);
 }
 
 void reclaim_free(DOS_FS *fs)
 {
     int reclaimed;
     uint32_t i;
+    uint32_t next_clus;
 
     if (verbose)
         printf("Checking for unused clusters.\n");
 
     reclaimed = 0;
+    set_exclusive_bitmap(fs);
+
+    /* Do not set bitmap in reclaim routine */
     for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
-        if (!get_owner(fs, i) && fs->fat[i].value &&
-                !FAT_IS_BAD(fs, fs->fat[i].value)) {
+        if (!test_bit(i, fs->real_bitmap)) {
+            continue;
+        }
+
+        get_fat(fs, i, &next_clus);
+        if (next_clus && !FAT_IS_BAD(fs, next_clus)) {
             set_fat(fs, i, 0);
             reclaimed++;
         }
@@ -270,30 +426,47 @@ void reclaim_free(DOS_FS *fs)
                 (unsigned long long)reclaimed * fs->cluster_size);
 }
 
-/* set owner of cluster which is orphan to dummy owner.
- * if it has circular chain, then break it */
-static void tag_free(DOS_FS *fs, DOS_FILE *ptr)
+/* Find start cluster of orphan files.
+ * After function call, start clusters are remained as set bit in real_bitmap */
+static void find_start_clusters(DOS_FS *fs)
 {
-    DOS_FILE *owner;
     uint32_t prev;
     uint32_t i, walk;
+    uint32_t next_clus;
+    uint32_t cnt;
 
     for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
-        if (fs->fat[i].value && !FAT_IS_BAD(fs, fs->fat[i].value) &&
-                !get_owner(fs, i) && !fs->fat[i].prev) {
-            prev = 0;
-            for (walk = i; walk > 0 && walk != -1;
+        if (!test_bit(i, fs->real_bitmap)) {
+            continue;
+        }
+
+        get_fat(fs, i, &next_clus);
+        if (next_clus && !FAT_IS_BAD(fs, next_clus)) {
+            prev = i;
+            cnt = 1;
+            for (walk = next_cluster(fs, i); walk > 0 && walk != -1;
                     walk = next_cluster(fs, walk)) {
-                if (!(owner = get_owner(fs, walk)))
-                    set_owner(fs, walk, ptr);
-                else if (owner != ptr)
-                    /* TODO: need to analyze what it mean, which case? */
-                    die("Internal error: free chain collides with file");
+
+                /* broke self cycle case */
+                if (prev == walk) {
+                    set_fat(fs, prev, -1);
+                    break;
+                }
+
+                if (test_bit(walk, fs->real_bitmap)) {
+                    /* walk is not start cluster, just clear bit */
+                    clear_bit(walk, fs->real_bitmap);
+                }
                 else {
                     set_fat(fs, prev, -1);
                     break;
                 }
                 prev = walk;
+                cnt++;
+                if (cnt > fs->clusters) {
+                    printf("Orphan cluster(%d) has cluster chain cycle\n", i);
+                    break;;
+                }
             }
         }
     }
@@ -301,59 +474,51 @@ static void tag_free(DOS_FS *fs, DOS_FILE *ptr)
 
 void reclaim_file(DOS_FS *fs)
 {
-    DOS_FILE dummy;
-    int reclaimed, files, changed;
+    int reclaimed, files;
     uint32_t i, next, walk;
 
     if (verbose)
         printf("Reclaiming unconnected clusters.\n");
 
-    /* initialize FAT_ENTRY's 'prev' (reference count) field */
-    for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++)
-        fs->fat[i].prev = 0;
+    /* Remove checked cluster,
+     * After function called, remained bitmap represent orphan clusters */
+    set_exclusive_bitmap(fs);
 
-    /* set 'prev' field to find first cluster of chain, later */
+    /* check if orphan cluster chain has normal cluster.
+     * if then, set EOF to orphan cluster's value. */
     for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
-        next = fs->fat[i].value;
-        if (!get_owner(fs, i) && next && next < fs->clusters + FAT_START_ENT) {
-            /* i and next cluster is linked, but does not have owner */
-            if (get_owner(fs, next) || !fs->fat[next].value ||
-                    FAT_IS_BAD(fs, fs->fat[next].value))
+        uint32_t value;
+
+        /* if bit is set, that cluster is orphan cluster */
+        if (!test_bit(i, fs->real_bitmap)) {
+            continue;
+        }
+
+        get_fat(fs, i, &next);
+        if (next && next < fs->clusters + FAT_START_ENT) {
+            get_fat(fs, next, &value);
+            /* In case that i's next cluster is already in other cluster chain
+             * or i's next cluster has wrong cluster value */
+            if (!test_bit(next, fs->real_bitmap) ||
+                    !value || FAT_IS_BAD(fs, value))
                 set_fat(fs, i, -1);
-            else
-                fs->fat[next].prev++;
         }
     }
 
-    do {
-        tag_free(fs, &dummy);
-        changed = 0;
-
-        /* check orphan cluster's onwer again.
-         * And if it has, then set cluster to EOF.
-         * if it is changed then check again */
-        for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
-            if (fs->fat[i].value && !FAT_IS_BAD(fs, fs->fat[i].value) &&
-                    !get_owner(fs, i)) {
-
-                if (!fs->fat[fs->fat[i].value].prev--)
-                    die("Internal error: prev going below zero");
-
-                set_fat(fs, i, -1);
-                changed = 1;
-                printf("Broke cycle at cluster %u in free chain.\n", i);
-                break;
-            }
-        }
-    } while (changed);
+    /* after find_start_clusters(),
+     * real_bitmap represent orphan's start cluster */
+    find_start_clusters(fs);
 
     files = reclaimed = 0;
     for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
-        /* if i(cluster) is the first cluster of orphaned cluster chain,
-         * make entry in root directory and set i to start cluster */
-        if (get_owner(fs, i) == &dummy && !fs->fat[i].prev) {
+        /* check real_bitmap, and if it set,
+         * it(i) is orphaned cluster's start cluster */
+        if (test_bit(i, fs->real_bitmap)) {
             DIR_ENT de;
             loff_t offset;
+            uint32_t clus_cnt;
+            uint32_t prev;
+
             files++;
             offset = alloc_rootdir_entry(fs, &de, "FSCK%04dREC");
             de.start = CT_LE_W(i & 0xffff);
@@ -361,11 +526,37 @@ void reclaim_file(DOS_FS *fs)
             if (fs->fat_bits == 32)
                 de.starthi = CT_LE_W(i >> 16);
 
-            for (walk = i; walk > 0 && walk != -1;
-                    walk = next_cluster(fs, walk)) {
-                de.size = CT_LE_L(CF_LE_L(de.size) + fs->cluster_size);
-                reclaimed++;
+            set_bitmap_reclaim(fs, i);
+
+            if (list) {
+                printf("Reclaimed file %s, start cluster(%d)\n",
+                        file_name((unsigned char *)de.name), i);
             }
+
+            /* check circular/shared cluster chain */
+            clus_cnt = 1;
+            prev = i;
+            for (walk = next_cluster(fs, i);
+                    walk > 0 && walk < fs->clusters + FAT_START_ENT;
+                    walk = next_cluster(fs, walk)) {
+
+                if (test_bit(walk, fs->real_bitmap)) {
+                    printf("WARNING: there should be not exist set bit of real_bitmap"
+                            " on reclaim cluster chain.\n");
+                }
+
+                if (test_bit(walk, fs->reclaim_bitmap)) {
+                    set_fat(fs, prev, -1);
+                    break;
+                }
+                prev = walk;
+                clus_cnt++;
+
+                set_bitmap_reclaim(fs, walk);
+            }
+
+            de.size = CT_LE_L(clus_cnt * fs->cluster_size);
+            reclaimed += clus_cnt;
 
             fs_write(offset, sizeof(DIR_ENT), &de);
         }
@@ -380,15 +571,27 @@ void reclaim_file(DOS_FS *fs)
 
 uint32_t update_free(DOS_FS *fs)
 {
-    uint32_t i;
     uint32_t free = 0;
     int do_set = 0;
 
-    /* is it possible to calclulate free count in previous routine?
-     * (in reclaim_free or reclaim_file) */
-    for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++)
-        if (!get_owner(fs, i) && !FAT_IS_BAD(fs, fs->fat[i].value))
+#if 0
+    uint32_t i;
+    uint32_t next;
+    int temp_cnt = 0;
+
+    /* TODO: to improve performance like as read_fat() */
+    for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
+        get_fat(fs, i, &next);
+        if (!next) {
             ++free;
+        }
+        else
+            temp_cnt++;
+    }
+    printf("calculated free2(get_fat) %d, alloced clusters %d\n", free, temp_cnt);
+#endif
+
+    free = fs->clusters - alloc_clusters;
 
     if (!fs->fsinfo_start)
         return free;

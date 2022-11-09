@@ -162,6 +162,37 @@ void check_atari(int *atari_format)
 #endif
 }
 
+/* bit operation function from linux bitops source */
+void set_bit(unsigned int nr, unsigned long *addr)
+{
+    unsigned long mask = BIT_MASK(nr);
+    unsigned long *p = addr + BIT_WORD(nr);
+
+    *p |= mask;
+}
+
+void clear_bit(unsigned int nr, unsigned long *addr)
+{
+    unsigned long mask = BIT_MASK(nr);
+    unsigned long *p = addr + BIT_WORD(nr);
+
+    *p &= ~mask;
+
+}
+
+void change_bit(unsigned int nr, unsigned long *addr)
+{
+    unsigned long mask = BIT_MASK(nr);
+    unsigned long *p = addr + BIT_WORD(nr);
+
+    *p ^= mask;
+}
+
+int test_bit(unsigned int nr, unsigned long *addr)
+{
+    return 1UL & (addr[BIT_WORD(nr)] >> (nr & (BITS_PER_LONG - 1)));
+}
+
 void print_mem(void)
 {
     unsigned long hmem;

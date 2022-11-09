@@ -7,13 +7,27 @@
 #ifndef _FAT_H
 #define _FAT_H
 
+typedef enum fat_select {
+    FAT_NONE = -1,
+    FAT_FIRST = 0,
+    FAT_SECOND = 1,
+} fat_select_t;
+
 /* Loads the FAT of the file system described by FS. Initializes the FAT,
    replaces broken FATs and rejects invalid cluster entries. */
 void read_fat(DOS_FS *fs);
 
-/* read cluster-th FAT_ENTRY value from fs->fat
- * this function should be called after read_fat() */
-void get_fat(DOS_FS *fs, uint32_t cluster, FAT_ENTRY *entry);
+void get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value);
+void modify_fat(DOS_FS *fs, uint32_t cluster, uint32_t new);
+
+void set_bitmap_reclaim(DOS_FS *fs, uint32_t cluster);
+void clear_bitmap_reclaim(DOS_FS *fs, uint32_t cluster);
+
+void set_bitmap_occupied(DOS_FS *fs, uint32_t cluster);
+void clear_bitmap_occupied(DOS_FS *fs, uint32_t cluster);
+
+void inc_alloc_cluster(void);
+void dec_alloc_cluster(void);
 
 /* Changes the value of the CLUSTERth cluster of the FAT of FS to NEW. Special
    values of NEW are -1 (EOF, 0xff8 or 0xfff8) and -2 (bad sector, 0xff7 or
@@ -31,15 +45,6 @@ uint32_t next_cluster(DOS_FS *fs, uint32_t cluster);
 
 /* Returns the byte offset of CLUSTER, relative to the respective device. */
 loff_t cluster_start(DOS_FS *fs, uint32_t cluster);
-
-/* Sets the owner pointer of the respective cluster to OWNER. If OWNER was NULL
-   before, it can be set to NULL or any non-NULL value. Otherwise, only NULL is
-   accepted as the new value. */
-void set_owner(DOS_FS *fs, uint32_t cluster, DOS_FILE *owner);
-
-/* Returns the owner of the repective cluster or NULL if the cluster has no
-   owner. */
-DOS_FILE *get_owner(DOS_FS *fs, uint32_t cluster);
 
 /* Scans the disk for currently unused bad clusters and marks them as bad. */
 void fix_bad(DOS_FS *fs);

@@ -190,7 +190,10 @@ typedef struct {
     loff_t fsinfo_start; /* 0 if not present */
     uint32_t free_clusters;
     loff_t backupboot_start; /* 0 if not present */
-    FAT_ENTRY *fat;
+    unsigned int bitmap_size;
+    unsigned long *bitmap;  /* for marked cluster on disk */
+    unsigned long *real_bitmap; /* for real cluster chain through scan */
+    unsigned long *reclaim_bitmap;  /* for orphan cluster reclaiming */
     char *label;
 } DOS_FS;
 
