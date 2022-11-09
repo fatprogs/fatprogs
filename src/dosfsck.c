@@ -181,6 +181,7 @@ int main(int argc, char **argv)
 
     if (verify) {
         printf("Starting verification pass.\n");
+        n_files = 0;
         read_fat(&fs);
         scan_root(&fs);
         check_volume_label(&fs);
