@@ -179,7 +179,7 @@ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
         DIR_ENT *root_ent;
         int next_free = 0, scan;
 
-        root_ent = alloc(fs->root_entries * sizeof(DIR_ENT));
+        root_ent = alloc_mem(fs->root_entries * sizeof(DIR_ENT));
         fs_read(fs->root_start, fs->root_entries * sizeof(DIR_ENT), root_ent);
 
         while (next_free < fs->root_entries) {
@@ -219,7 +219,7 @@ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
             if (++curr_num >= 10000)
                 die("Unable to create unique name");
         }
-        free(root_ent);
+        free_mem(root_ent);
     }
     ++n_files;
     return offset;
@@ -1435,7 +1435,7 @@ void add_label(DOS_FILE *label, label_t **head, label_t **last)
 {
     label_t *new = NULL;
 
-    new = alloc(sizeof(label_t));
+    new = alloc_mem(sizeof(label_t));
     new->file = label;
     new->next = NULL;
     new->flag = LABEL_FLAG_NONE;
@@ -1472,7 +1472,7 @@ void del_label(label_t *label, label_t **prev, label_t **head, label_t **last)
             *last = NULL;
         }
     }
-    free(label);
+    free_mem(label);
 }
 
 void clean_label(label_t **head, label_t **last)
@@ -1486,7 +1486,7 @@ void clean_label(label_t **head, label_t **last)
         if (this == (*last))
             (*last) = NULL;
 
-        free(this);
+        free_mem(this);
     }
 }
 

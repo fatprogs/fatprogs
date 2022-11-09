@@ -26,7 +26,9 @@ void pdie(char *msg, ...) __attribute((noreturn));
 
 /* mallocs SIZE bytes and returns a pointer to the data.
  * Terminates the program if malloc fails. */
-void *alloc(int size);
+void *alloc_mem(int size);
+void free_mem(void *p);
+void print_mem(void);
 
 /* Like alloc, but registers the data area in a list described by ROOT. */
 void *qalloc(void **root, int size);

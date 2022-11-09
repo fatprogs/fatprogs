@@ -1154,7 +1154,7 @@ static void setup_tables(void)
     }
 
     /* Make the file allocation tables! */
-    if ((fat = (unsigned char *)malloc(sec_per_fat * sector_size)) == NULL)
+    if ((fat = (unsigned char *)alloc_mem(sec_per_fat * sector_size)) == NULL)
         die("unable to allocate space for FAT image in memory");
 
     memset(fat, 0, sec_per_fat * sector_size);
@@ -1173,8 +1173,8 @@ static void setup_tables(void)
         (((int)bs.dir_entries[1] * 256 + (int)bs.dir_entries[0]) *
          sizeof(struct dir_entry));
 
-    if ((root_dir = (struct dir_entry *)malloc(size_root_dir)) == NULL) {
-        free (fat);		/* Tidy up before we die! */
+    if ((root_dir = (struct dir_entry *)alloc_mem(size_root_dir)) == NULL) {
+        free_mem(fat);		/* Tidy up before we die! */
         die("unable to allocate space for root directory in memory");
     }
 
@@ -1203,7 +1203,7 @@ static void setup_tables(void)
         /* For FAT32, create an fsinfo sector */
         struct fsinfo_sector *info;
 
-        if (!(fsinfo = malloc(sector_size)))
+        if (!(fsinfo = alloc_mem(sector_size)))
             die("Out of memory");
 
         memset(fsinfo, 0, sector_size);
@@ -1222,7 +1222,7 @@ static void setup_tables(void)
         info->boot_sign = CT_LE_W(BOOT_SIGN);
     }
 
-    if (!(blank_sector = malloc(sector_size)))
+    if (!(blank_sector = alloc_mem(sector_size)))
         die("Out of memory");
 
     memset(blank_sector, 0, sector_size);
@@ -1232,10 +1232,10 @@ static void setup_tables(void)
 
 #define error(str)				\
     do {						\
-        free(fat);					\
+        free_mem(fat);					\
         if (fsinfo)        \
-            free(fsinfo);	\
-        free(root_dir);				\
+            free_mem(fsinfo);	\
+        free_mem(root_dir);				\
         die(str);					\
     } while (0)
 
@@ -1330,13 +1330,13 @@ static void write_tables(void)
     }
 
     if (blank_sector)
-        free(blank_sector);
+        free_mem(blank_sector);
 
     if (fsinfo)
-        free(fsinfo);
+        free_mem(fsinfo);
 
-    free(root_dir);   /* Free up the root directory space from setup_tables */
-    free(fat);  /* Free up the fat table space reserved during setup_tables */
+    free_mem(root_dir);   /* Free up the root directory space from setup_tables */
+    free_mem(fat);  /* Free up the fat table space reserved during setup_tables */
 }
 
 /* Report the command usage and return a failure error code */
@@ -1444,7 +1444,7 @@ int main(int argc, char **argv)
                     msgfile = stdin;
 
                 if (msgfile) {
-                    if (!(template_boot_code = malloc(MAX_RESERVED)))
+                    if (!(template_boot_code = alloc_mem(MAX_RESERVED)))
                         die("Out of memory");
 
                     /* The template boot sector including reserved

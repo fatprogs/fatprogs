@@ -12,8 +12,14 @@
 #include <string.h>
 #include <stdarg.h>
 #include <errno.h>
+#ifdef __GNUC__
+#include <malloc.h>
+#endif
 
 #include "common.h"
+
+unsigned long max_alloc = 0;
+unsigned long total_alloc = 0;
 
 typedef struct _link {
     void *data;
@@ -42,25 +48,43 @@ void pdie(char *msg,...)
     exit(1);
 }
 
-void *alloc(int size)
+void *alloc_mem(int size)
 {
     void *this;
 
-    if ((this = malloc(size)))
+    if ((this = malloc(size))) {
+        memset(this, 0, size);
+        total_alloc += size;
+
+        if (total_alloc > max_alloc)
+            max_alloc = total_alloc;
+
         return this;
+    }
 
     pdie("malloc");
     return NULL; /* for GCC */
+}
+
+void free_mem(void *p)
+{
+    if (!p)
+        return;
+
+#ifdef __GNUC__
+    total_alloc -= malloc_usable_size(p);
+#endif
+    free(p);
 }
 
 void *qalloc(void **root, int size)
 {
     LINK *link;
 
-    link = alloc(sizeof(LINK));
+    link = alloc_mem(sizeof(LINK));
     link->next = *root;
     *root = link;
-    return link->data = alloc(size);
+    return link->data = alloc_mem(size);
 }
 
 void qfree(void **root)
@@ -70,9 +94,12 @@ void qfree(void **root)
     while (*root) {
         this = (LINK *) *root;
         *root = this->next;
-        free(this->data);
-        free(this);
+        free_mem(this->data);
+        free_mem(this);
     }
+
+    max_alloc = 0;
+    total_alloc = 0;
 }
 
 int min(int a, int b)
@@ -133,6 +160,43 @@ void check_atari(int *atari_format)
     }
     fclose(f);
 #endif
+}
+
+void print_mem(void)
+{
+    unsigned long hmem;
+    unsigned long lmem;
+
+    printf("Total allocated memory is %ld Bytes\n", total_alloc);
+    printf("Maximum allocated memory is ");
+
+    lmem = hmem = max_alloc;
+    if ((hmem >> 10) == 0) {
+        printf("%ld Bytes\n", lmem);
+        return;
+    }
+
+    hmem >>= 10;
+    if ((hmem >> 10) == 0) {
+        printf("%ld.%ld KBytes\n", hmem, lmem % (1 << 10));
+        return;
+    }
+
+    lmem = hmem;
+    hmem >>= 10;
+    if ((hmem >> 10) == 0) {
+        printf("%ld.%ld MBytes\n", hmem, lmem % (1 << 10));
+        return;
+    }
+
+    lmem = hmem;
+    hmem >>= 10;
+    if ((hmem >> 10) == 0) {
+        printf("%ld.%ld GBytes\n", hmem, lmem % (1 << 10));
+        return;
+    }
+
+    printf("more than PBytes\n");
 }
 
 /* Local Variables: */

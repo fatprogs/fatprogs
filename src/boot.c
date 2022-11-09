@@ -427,7 +427,7 @@ void read_boot(DOS_FS *fs)
 void clean_boot(DOS_FS *fs)
 {
     if (fs->label)
-        free(fs->label);
+        free_mem(fs->label);
 }
 
 /* Local Variables: */

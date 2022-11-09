@@ -170,6 +170,8 @@ int main(int argc, char **argv)
     file_unused();
 
     clean_dirty_flag(&fs);
+    if (verbose)
+        print_mem();
     qfree(&mem_queue);
 
     if (verify) {
@@ -179,6 +181,8 @@ int main(int argc, char **argv)
         check_volume_label(&fs);
         reclaim_free(&fs);
         clean_dirty_flag(&fs);
+        if (verbose)
+            print_mem();
         qfree(&mem_queue);
     }
 

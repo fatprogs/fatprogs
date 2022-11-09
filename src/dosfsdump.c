@@ -263,7 +263,7 @@ void __read_fat_dump(DOS_FS *fs)
 
     /* 2 == FAT_START_ENT */
     size = ((fs->clusters + 2ULL) * fs->fat_bits + 7) / 8ULL;
-    fat = alloc(size);
+    fat = alloc_mem(size);
 
     fat_offset = fs->fat_start;
     if (fat_num && fat_num < fs->nfats) {
@@ -273,7 +273,7 @@ void __read_fat_dump(DOS_FS *fs)
     llseek(fd_in, fat_offset, SEEK_SET);
     read(fd_in, fat, size);
 
-    fs->fat = alloc(sizeof(FAT_ENTRY) * (fs->clusters + 2ULL));
+    fs->fat = alloc_mem(sizeof(FAT_ENTRY) * (fs->clusters + 2ULL));
 
     for (i = 0; i < FAT_START_ENT; i++) {
         GET_FAT_ENTRY(&fs->fat[i], fat, i, fs);
@@ -290,7 +290,7 @@ void __read_fat_dump(DOS_FS *fs)
         }
     }
 
-    free(fat);
+    free_mem(fat);
 }
 
 static void dump_fats(DOS_FS *fs)
@@ -473,7 +473,7 @@ static void usage(char *name)
 void clean_dump(DOS_FS *fs)
 {
     if (fs->fat)
-        free(fs->fat);
+        free_mem(fs->fat);
 }
 
 int main(int argc, char *argv[])
@@ -525,7 +525,7 @@ int main(int argc, char *argv[])
         //__read_boot_dump(&fs);
     }
 
-    buf_sec = malloc(sector_size);
+    buf_sec = alloc_mem(sector_size);
     if (!buf_sec) {
         die("Memory allocation failed(%s,%d)", __func__, __LINE__);
     }
@@ -540,7 +540,7 @@ int main(int argc, char *argv[])
 
     dump_fats(&fs);
 
-    free(buf_sec);
+    free_mem(buf_sec);
 
     if (dump_flag <= DUMP_FAT) {
         printf("Dump reserved sectors and FATs only!\n");
@@ -548,7 +548,7 @@ int main(int argc, char *argv[])
     }
 
     /* default buffer size is cluster size */
-    buf_clus = malloc(fs.cluster_size);
+    buf_clus = alloc_mem(fs.cluster_size);
     if (!buf_clus) {
         die("Memory allocation failed(%s,%d)", __func__, __LINE__);
     }
@@ -556,7 +556,7 @@ int main(int argc, char *argv[])
     dump_data(&fs);
     dump_orphaned(&fs);
 
-    free(buf_clus);
+    free_mem(buf_clus);
 
     clean_dump(&fs);
 

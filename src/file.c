@@ -168,7 +168,7 @@ void file_add(char *path, FD_TYPE type)
         }
 
         if (!walk) {
-            walk = alloc(sizeof(FDSC));
+            walk = alloc_mem(sizeof(FDSC));
             strncpy(walk->name, name, MSDOS_NAME);
             walk->type = here ? fdt_none : type;
             walk->first = NULL;
@@ -251,7 +251,7 @@ void file_modify(FDSC **curr, char *fixed)
             die("Internal error: file_modify");
     }
     next = (*this)->next;
-    free(*this);
+    free_mem(*this);
     *this = next;
 }
 
@@ -266,7 +266,7 @@ static void report_unused(FDSC *this)
         else if (this->type != fdt_none)
             printf("Warning: did not %s file %s\n", this->type == fdt_drop ?
                     "drop" : "undelete", file_name((unsigned char *)this->name));
-        free(this);
+        free_mem(this);
         this = next;
     }
 }

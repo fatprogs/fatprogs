@@ -120,9 +120,9 @@ int fs_test(loff_t pos, int size)
 
     if (llseek(fd, pos, SEEK_SET) != pos)
         pdie("Seek to %lld", pos);
-    scratch = alloc(size);
+    scratch = alloc_mem(size);
     okay = read(fd, scratch, size) == size;
-    free(scratch);
+    free_mem(scratch);
     return okay;
 }
 
@@ -143,9 +143,9 @@ void fs_write(loff_t pos, int size, void *data)
 
         die("Wrote %d bytes instead of %d at %lld", did, size, pos);
     }
-    new = alloc(sizeof(CHANGE));
+    new = alloc_mem(sizeof(CHANGE));
     new->pos = pos;
-    memcpy(new->data = alloc(new->size = size), data, size);
+    memcpy(new->data = alloc_mem(new->size = size), data, size);
     new->next = NULL;
 
     if (last)
@@ -173,8 +173,8 @@ static void fs_flush(void)
         else if (size != this->size)
             fprintf(stderr, "Wrote %d bytes instead of %d bytes at %lld.\n",
                     size, this->size, (long long)this->pos);
-        free(this->data);
-        free(this);
+        free_mem(this->data);
+        free_mem(this);
     }
 }
 
@@ -189,8 +189,8 @@ int fs_close(int write)
     else
         while (changes) {
             next = changes->next;
-            free(changes->data);
-            free(changes);
+            free_mem(changes->data);
+            free_mem(changes);
             changes = next;
         }
 

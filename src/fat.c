@@ -61,7 +61,7 @@ void read_fat(DOS_FS *fs)
 
     /* 2 == FAT_START_ENT */
     eff_size = ((fs->clusters + 2ULL) * fs->fat_bits + 7) / 8ULL;
-    first = alloc(eff_size);
+    first = alloc_mem(eff_size);
     fs_read(fs->fat_start, eff_size, first);
 
     /* TODO: handle in case that fs->nfats is bigger than 2 */
@@ -71,7 +71,7 @@ void read_fat(DOS_FS *fs)
     }
 
     if (fs->nfats > 1) {
-        second = alloc(eff_size);
+        second = alloc_mem(eff_size);
         fs_read(fs->fat_start + fs->fat_size, eff_size, second);
     }
 
@@ -120,7 +120,7 @@ void read_fat(DOS_FS *fs)
     }
 
     if (second) {
-        free(second);
+        free_mem(second);
     }
 
     fs->fat = qalloc(&mem_queue, sizeof(FAT_ENTRY) * (fs->clusters + 2ULL));
@@ -139,7 +139,7 @@ void read_fat(DOS_FS *fs)
         }
     }
 
-    free(first);
+    free_mem(first);
 }
 
 void get_fat(DOS_FS *fs, uint32_t cluster, FAT_ENTRY *fatent)
