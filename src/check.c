@@ -937,8 +937,18 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
                     path_name(file), next_clus ? "bad" : "free", curr);
             if (prev)
                 set_fat(fs, prev, -1);
-            else if (!file->offset)
-                die("FAT32 root dir starts with a bad cluster!");
+            else if (!file->offset) {
+                if (FAT_IS_BAD(fs, next_clus)) {
+                    die("FAT32 root dir starts with a bad cluster!");
+                }
+
+                printf("  WARN: FAT32 root directory starts with free cluster!\n"
+                        "        First root cluster(%u) set EOF\n",
+                        fs->root_cluster);
+                set_fat(fs, curr, -1);
+                set_bitmap_occupied(fs, curr);
+                clusters++;
+            }
             else {
                 /* set start cluster to zero */
                 MODIFY_START(file, 0, fs);
