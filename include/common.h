@@ -31,7 +31,9 @@
 #define BIT_ULL_WORD(nr)    ((nr) / BITS_PER_LONG_LONG)
 /**/
 
-#define DEFAULT_FAT_BUF     (96 * 1024) /* Common Multiple of FAT12,16,32 */
+#define FAT_BUF         (96 * 1024) /* 96K, Common Multiple(CM) of 12,16,32 fat size */
+#define FAT_CACHE_BUF   (4096)      /* for mmap, aligned page size for FAT cache */
+#define FAT_CACHE_SIZE  (FAT_CACHE_BUF)
 
 /* Displays a prinf-style message and terminates the program. */
 void die(char *msg, ...) __attribute((noreturn));

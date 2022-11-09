@@ -11,6 +11,7 @@
 #define _IO_H
 
 #include <sys/types.h> /* for loff_t */
+#include <sys/mman.h>
 
 /* In earlier versions, an own llseek() was used, but glibc lseek() is
  * sufficient (or even better :) for 64 bit offsets in the meantime */
@@ -19,6 +20,8 @@
 /* Opens the file system PATH. If RW is zero, the file system is opened
    read-only, otherwise, it is opened read-write. */
 void fs_open(char *path, int rw);
+
+void fs_find_data_copy(loff_t pos, int size, void *data);
 
 /* Reads SIZE bytes starting at POS into DATA. Performs all applicable
    changes. */
@@ -40,6 +43,9 @@ int fs_close(int write);
 
 /* Determines whether the file system has changed. See fs_close. */
 int fs_changed(void);
+
+void *fs_mmap(void *hint, off_t offset, int length);
+#define fs_munmap    munmap
 
 /* Print wrong data in CHNAGE lists */
 void print_changes(void);

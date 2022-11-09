@@ -170,6 +170,7 @@ int main(int argc, char **argv)
     file_unused();
 
     clean_dirty_flag(&fs);
+
     if (verbose) {
         print_mem();
 #ifdef DEBUG
@@ -187,6 +188,7 @@ int main(int argc, char **argv)
         clean_dirty_flag(&fs);
         if (verbose)
             print_mem();
+
         qfree(&mem_queue);
     }
 
@@ -205,6 +207,10 @@ int main(int argc, char **argv)
             fs.clusters - free_clusters, fs.clusters);
 
     clean_boot(&fs);
+    if (fs.fat_cache.addr) {
+        fs_munmap(fs.fat_cache.addr, FAT_CACHE_SIZE);
+    }
+
     return fs_close(rw) ? 1 : 0;
 }
 

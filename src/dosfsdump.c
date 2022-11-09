@@ -333,7 +333,7 @@ static void dump__read_fat(DOS_FS *fs)
     fat_size = ((fs->clusters + 2ULL) * fs->fat_bits + 7) / BITS_PER_BYTE;
     fs->bitmap_size = (fat_size + 7) / BITS_PER_BYTE;
 
-    read_size = min(DEFAULT_FAT_BUF, fat_size);
+    read_size = min(FAT_BUF, fat_size);
     fat = alloc_mem(read_size);
 
     remain_size = fat_size;

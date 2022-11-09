@@ -168,11 +168,14 @@ typedef struct _dos_file {
 } DOS_FILE;
 
 typedef struct {
-    uint32_t value;
-    uint32_t reserved;
-    DOS_FILE *owner;
-    uint32_t prev;      /* number of clusters that point this cluster */
-} FAT_ENTRY;
+    uint32_t start; /* start cluster number of fat cache */
+    uint32_t cnt;       /* # of clusters in fat cache */
+    uint32_t first_cpc; /* # of clusters in first fat cache */
+    uint32_t last_cpc;  /* # of clusters in last fat cache */
+    uint32_t cpc;       /* clusters per cache - # of clusters per fat cache */
+    uint32_t diff;      /* diff from fat start and mmap aligned address */
+    char *addr;
+} FAT_CACHE;
 
 typedef struct {
     int nfats;
@@ -194,6 +197,7 @@ typedef struct {
     unsigned long *bitmap;  /* for marked cluster on disk */
     unsigned long *real_bitmap; /* for real cluster chain through scan */
     unsigned long *reclaim_bitmap;  /* for orphan cluster reclaiming */
+    FAT_CACHE fat_cache;
     char *label;
 } DOS_FS;
 

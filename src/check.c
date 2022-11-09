@@ -723,6 +723,7 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
         if (test_bit(curr, fs->real_bitmap)) {
             /* already bit of curr is set in fs->real_bitmap */
             int do_trunc = 0;
+
             printf("%s(second) share other file(first)'s clusters\n",
                     path_name(file));
             clusters2 = 0;
@@ -2502,8 +2503,6 @@ static DOS_FILE *find_owner(DOS_FS *fs, uint32_t cluster)
 
     return NULL;
 }
-
-
 
 /* Local Variables: */
 /* tab-width: 8     */

@@ -46,6 +46,26 @@ void set_exclusive_bitmap(DOS_FS *fs)
      * reclaim_bitmap : zero cleared for reclaimed cluster */
 }
 
+static void init_fat_cache(DOS_FS *fs)
+{
+    loff_t aligned_offset;
+
+    /* initialize fat cache */
+    fs->fat_cache.start = -1;
+
+    aligned_offset = fs->fat_start & ~(sysconf(_SC_PAGE_SIZE) - 1);
+    fs->fat_cache.diff = fs->fat_start - aligned_offset;
+
+    fs->fat_cache.cpc = FAT_CACHE_SIZE / fs->fat_bits * BITS_PER_BYTE;
+    fs->fat_cache.first_cpc =
+        (FAT_CACHE_SIZE - fs->fat_cache.diff) / fs->fat_bits * BITS_PER_BYTE;
+    fs->fat_cache.last_cpc =
+        ((fs->clusters + FAT_START_ENT) - fs->fat_cache.first_cpc) %
+        fs->fat_cache.cpc;
+
+    fs->fat_cache.addr = NULL;
+}
+
 void read_fat(DOS_FS *fs)
 {
     int fat_size;
@@ -85,6 +105,8 @@ void read_fat(DOS_FS *fs)
     fs->bitmap = qalloc(&mem_queue, bitmap_size);
     fs->real_bitmap = qalloc(&mem_queue, bitmap_size);
     fs->reclaim_bitmap = qalloc(&mem_queue, bitmap_size);
+
+    init_fat_cache(fs);
 
     /* read FAT with DEFALUT_FAT_BUF size for memory optimization */
     while (remain_size > 0) {
@@ -199,6 +221,62 @@ void read_fat(DOS_FS *fs)
     free_mem(first_fat);
 }
 
+/* read_fat_cache apply only FAT32 */
+static void read_fat_cache(DOS_FS *fs, uint32_t cluster)
+{
+    loff_t mmap_offset;
+    loff_t aligned_offset;
+
+    if (cluster > fs->clusters + FAT_START_ENT) {
+        die("cluster number is more than max cluster number\n");
+    }
+
+    /* fat cache doesn't hit */
+    if (!(cluster >= fs->fat_cache.start &&
+            cluster < fs->fat_cache.start + fs->fat_cache.cnt)) {
+        mmap_offset = fs->fat_start + cluster * fs->fat_bits / BITS_PER_BYTE;
+        aligned_offset = mmap_offset & ~(sysconf(_SC_PAGE_SIZE) - 1);
+
+        /* fat_start is already page algined address */
+        if (fs->fat_cache.diff == 0) {
+            fs->fat_cache.cnt = fs->fat_cache.cpc;
+            fs->fat_cache.start = (cluster >= FAT_START_ENT) ?
+                ((cluster - 1) / fs->fat_cache.cpc) *  fs->fat_cache.cpc : 0;
+        }
+        /* fat_start is not page aligned address */
+        else {
+            /* first cache */
+            if (cluster >= 0 && cluster < fs->fat_cache.first_cpc) {
+                fs->fat_cache.start = 0;
+                fs->fat_cache.cnt = fs->fat_cache.first_cpc;
+            }
+            /* last cache */
+            else if (cluster >=
+                    (fs->clusters + FAT_START_ENT) - fs->fat_cache.last_cpc) {
+                fs->fat_cache.start =
+                    ((cluster - fs->fat_cache.first_cpc) / fs->fat_cache.cpc) *
+                    fs->fat_cache.cpc + fs->fat_cache.first_cpc;
+                fs->fat_cache.cnt = fs->fat_cache.last_cpc;
+            }
+            /* others */
+            else {
+                fs->fat_cache.cnt = fs->fat_cache.cpc;
+                fs->fat_cache.start =
+                    ((cluster - fs->fat_cache.first_cpc) / fs->fat_cache.cpc) *
+                    fs->fat_cache.cpc + fs->fat_cache.first_cpc;
+            }
+        }
+
+        /* munmap for previous memory mapping and mmap new FAT area
+         * that include cluster */
+        if (fs->fat_cache.start != -1) {
+            fs_munmap(fs->fat_cache.addr, FAT_CACHE_SIZE);
+        }
+
+        fs->fat_cache.addr = fs_mmap(NULL, aligned_offset, FAT_CACHE_SIZE);
+    }
+}
+
 void get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value)
 {
     loff_t offset;
@@ -220,6 +298,8 @@ void get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value)
             unsigned short data;
 
             clus_size = 2;
+
+            /* TODO: is it needed applying fat_cache? */
             offset = fs->fat_start + cluster * clus_size;
             fs_read(offset, clus_size, &data);
 
@@ -230,8 +310,21 @@ void get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value)
             uint32_t data;
 
             clus_size = 4;
+#if 1
+            read_fat_cache(fs, cluster);
+
+            /* offset in cache */
+            offset = ((cluster - fs->fat_cache.start) * clus_size) % FAT_CACHE_SIZE;
+            data = *(uint32_t *)(fs->fat_cache.addr + offset);
+
+            /* offset in block device */
+            offset = fs->fat_start + cluster * clus_size;
+            fs_find_data_copy(offset, clus_size, &data);
+#else
+            /* offset in device */
             offset = fs->fat_start + cluster * clus_size;
             fs_read(offset, clus_size, &data);
+#endif
 
             /* According to MS, the high 4 bits of a FAT32 entry are reserved and
              * are not part of the cluster number. So we cut them off. */
@@ -598,10 +691,18 @@ uint32_t update_free(DOS_FS *fs)
     if (!fs->fsinfo_start)
         return free;
 
-    if (verbose)
+    if (verbose) {
         printf("Checking free cluster summary.\n");
 
+        printf("Total clusters: %d, Allocated clusters: %d, Free clusters: %d\n",
+                fs->clusters, alloc_clusters, fs->clusters - alloc_clusters);
+    }
+
     if (fs->free_clusters >= 0) {
+        if (fs->free_clusters == -1) {
+            printf("Free cluster summary is not initialized\n");
+        }
+
         if (free != fs->free_clusters) {
             printf("Free cluster summary wrong (%u vs. really %u)\n",
                     fs->free_clusters, free);

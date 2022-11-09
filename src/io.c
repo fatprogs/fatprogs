@@ -86,20 +86,11 @@ void fs_open(char *path, int rw)
 #endif
 }
 
-void fs_read(loff_t pos, int size, void *data)
+/* Find whether data in position has modified on CHANGE list,
+ * and if then, apply modified new data. */
+void fs_find_data_copy(loff_t pos, int size, void *data)
 {
     CHANGE *walk;
-    int got;
-
-    if (llseek(fd, pos, SEEK_SET) != pos)
-        pdie("Seek to %lld(%d,%s)", pos, __LINE__, __func__);
-
-    if ((got = read(fd, data, size)) < 0)
-        die("Got %d bytes instead of %d at %lld(%d,%s)",
-                got, size, pos, __LINE__, __func__);
-
-    if (got != size)
-        die("Got %d bytes instead of %d at %lld", got, size, pos);
 
     for (walk = changes; walk; walk = walk->next) {
         if (pos + size < walk->pos) {
@@ -116,6 +107,24 @@ void fs_read(loff_t pos, int size, void *data)
                         min(walk->size, size + pos - walk->pos));
         }
     }
+}
+
+void fs_read(loff_t pos, int size, void *data)
+{
+    int got;
+
+    if (llseek(fd, pos, SEEK_SET) != pos)
+        pdie("Seek to %lld(%d,%s)", pos, __LINE__, __func__);
+
+    if ((got = read(fd, data, size)) < 0)
+        die("Got %d bytes instead of %d at %lld(%d,%s)",
+                got, size, pos, __LINE__, __func__);
+
+    if (got != size)
+        die("Got %d bytes instead of %d at %lld(%d,%s)",
+                got, size, pos, __LINE__, __func__);
+
+    fs_find_data_copy(pos, size, data);
 }
 
 int fs_test(loff_t pos, int size)
@@ -393,6 +402,18 @@ int fs_close(int write)
 int fs_changed(void)
 {
     return !!changes || did_change;
+}
+
+void *fs_mmap(void *addr, off_t offset, int length)
+{
+    void *ret_addr = NULL;
+
+    ret_addr = mmap(addr, length, PROT_READ, MAP_SHARED, fd, offset);
+    if (ret_addr < 0) {
+        pdie("mmap %ld offset failed", offset);
+    }
+
+    return ret_addr;
 }
 
 /* Local Variables: */
