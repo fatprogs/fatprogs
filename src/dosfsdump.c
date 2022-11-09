@@ -41,6 +41,7 @@ uint32_t max_clus_num;  /* Not used, for removing compile error */
 
 char *buf_clus = NULL;
 char *buf_sec = NULL;
+char outfile[256];
 
 static void traverse_tree(DOS_FS *fs, uint32_t clus_num, int attr);
 
@@ -539,12 +540,13 @@ retry:
 
 static void usage(char *name)
 {
-    fprintf(stderr, "Usage: %s [-f <fat number>] [-o <none>] [-v] device\n", name);
+    fprintf(stderr, "Usage: %s [-o <output file path>] [-f <fat number>] [-v] [-h] device\n", name);
     fprintf(stderr,
-            "  -f <fat number>  FAT number to traverse cluster chain\n");
+            "  -o <output file path>    help message\n");
     fprintf(stderr,
-            "  -v               verbose mode\n");
-    exit(2);
+            "  -f <fat number>          FAT number to traverse cluster chain\n");
+    fprintf(stderr, "  -v                       verbose mode\n");
+    fprintf(stderr, "  -h                       help message\n");
 }
 
 void clean_dump(DOS_FS *fs)
@@ -565,6 +567,7 @@ int main(int argc, char *argv[])
 
     check_atari(&atari_format);
 
+    memcpy(outfile, DUMP_FILENAME, 255);
     while ((c = getopt(argc, argv, "f:o:v")) != EOF) {
         switch (c) {
             case 'f':
@@ -572,7 +575,13 @@ int main(int argc, char *argv[])
                 /* dump data using n-th FAT */
                 break;
             case 'o':   /* specify output file */
-                /* TODO: to be implemented */
+                memset(outfile, 0, 255);
+                if (strlen(optarg) > 255) {
+                    printf("!! Output filename length is longer than 255\n");
+                    usage(argv[0]);
+                    exit(EXIT_SYNTAX_ERROR);
+                }
+                memcpy(outfile, optarg, strlen(optarg));
                 break;
             case 'v':
                 verbose = 1;
@@ -591,12 +600,12 @@ int main(int argc, char *argv[])
     fd_in = open(argv[optind], O_RDONLY);
     if (fd_in < 0) {
         printf("Can't open device('%s')\n", argv[optind]);
-        exit(-1);
+        exit(EXIT_FAILURE);
     }
 
-    fd_out = open(DUMP_FILENAME, O_RDWR | O_CREAT | O_TRUNC, 0666);
+    fd_out = open(outfile, O_RDWR | O_CREAT | O_TRUNC, 0666);
     if (fd_out < 0) {
-        printf("Can't open output file('%s')\n", DUMP_FILENAME);
+        printf("Can't open output file('%s')\n", outfile);
         exit(EXIT_FAILURE);
     }
 
@@ -643,4 +652,5 @@ int main(int argc, char *argv[])
 
     close(fd_in);
     close(fd_out);
+    printf("Done: dump \"%s\" to \"%s\"\n", argv[optind], outfile);
 }
