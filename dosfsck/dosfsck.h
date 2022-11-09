@@ -5,7 +5,6 @@
 /* FAT32, VFAT, Atari format support, and various fixes additions May 1998
  * by Roman Hodek <Roman.Hodek@informatik.uni-erlangen.de> */
 
-
 #ifndef _DOSFSCK_H
 #define _DOSFSCK_H
 
@@ -122,7 +121,7 @@ struct info_sector {
 };
 
 typedef struct {
-    __u8	name[8],ext[3];	/* name and extension */
+    __u8	name[8], ext[3];    /* name and extension */
     __u8	attr;		/* attribute bits */
     __u8	lcase;		/* Case for base and extension */
     __u8	ctime_ms;	/* Creation time, milliseconds */
@@ -130,7 +129,7 @@ typedef struct {
     __u16	cdate;		/* Creation date */
     __u16	adate;		/* Last access date */
     __u16	starthi;	/* High 16 bits of cluster in FAT32 */
-    __u16	time,date,start;/* time, date and first cluster */
+    __u16	time, date, start;  /* time, date and first cluster */
     __u32	size;		/* file size (in bytes) */
 } DIR_ENT;
 
@@ -147,7 +146,7 @@ typedef struct {
     uint32_t value;
     uint32_t reserved;
     DOS_FILE *owner;
-    uint32_t prev; /* number of previous clusters */
+    uint32_t prev;      /* number of clusters that point this cluster */
 } FAT_ENTRY;
 
 typedef struct {
@@ -170,26 +169,26 @@ typedef struct {
 } DOS_FS;
 
 #ifndef offsetof
-#define offsetof(t,e)	((int)&(((t *)0)->e))
+#define offsetof(t, e)	((off_t)&(((t *)0)->e))
 #endif
 
-extern int interactive,list,verbose,test,write_immed;
+extern int interactive, list, verbose, test, write_immed;
 extern int atari_format;
 extern unsigned n_files;
 extern void *mem_queue;
 
 /* value to use as end-of-file marker */
 #define FAT_EOF(fs)	((atari_format ? 0xfff : 0xff8) | FAT_EXTD(fs))
-#define FAT_IS_EOF(fs,v) ((uint32_t)(v) >= (0xff8|FAT_EXTD(fs)))
+#define FAT_IS_EOF(fs, v) ((uint32_t)(v) >= (0xff8 | FAT_EXTD(fs)))
 /* value to mark bad clusters */
 #define FAT_BAD(fs)	(0xff7 | FAT_EXTD(fs))
 /* range of values used for bad clusters */
 #define FAT_MIN_BAD(fs)	((atari_format ? 0xff0 : 0xff7) | FAT_EXTD(fs))
 #define FAT_MAX_BAD(fs)	((atari_format ? 0xff7 : 0xff7) | FAT_EXTD(fs))
-#define FAT_IS_BAD(fs,v) ((v) >= FAT_MIN_BAD(fs) && (v) <= FAT_MAX_BAD(fs))
+#define FAT_IS_BAD(fs, v) ((v) >= FAT_MIN_BAD(fs) && (v) <= FAT_MAX_BAD(fs))
 
 /* return -16 as a number with fs->fat_bits bits */
-#define FAT_EXTD(fs)	(((1 << fs->eff_fat_bits)-1) & ~0xf)
+#define FAT_EXTD(fs)	(((1 << fs->eff_fat_bits) - 1) & ~0xf)
 
 #endif
 

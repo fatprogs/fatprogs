@@ -5,7 +5,6 @@
 /* FAT32, VFAT, Atari format support, and various fixes additions May 1998
  * by Roman Hodek <Roman.Hodek@informatik.uni-erlangen.de> */
 
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -14,48 +13,45 @@
 
 #include "common.h"
 
-
 typedef struct _link {
     void *data;
     struct _link *next;
 } LINK;
 
-
 void die(char *msg,...)
 {
     va_list args;
 
-    va_start(args,msg);
-    vfprintf(stderr,msg,args);
+    va_start(args, msg);
+    vfprintf(stderr, msg, args);
     va_end(args);
-    fprintf(stderr,"\n");
+    fprintf(stderr, "\n");
     exit(1);
 }
-
 
 void pdie(char *msg,...)
 {
     va_list args;
 
-    va_start(args,msg);
-    vfprintf(stderr,msg,args);
+    va_start(args, msg);
+    vfprintf(stderr, msg, args);
     va_end(args);
-    fprintf(stderr,":%s\n",strerror(errno));
+    fprintf(stderr,":%s\n", strerror(errno));
     exit(1);
 }
-
 
 void *alloc(int size)
 {
     void *this;
 
-    if ((this = malloc(size))) return this;
+    if ((this = malloc(size)))
+        return this;
+
     pdie("malloc");
     return NULL; /* for GCC */
 }
 
-
-void *qalloc(void **root,int size)
+void *qalloc(void **root, int size)
 {
     LINK *link;
 
@@ -64,7 +60,6 @@ void *qalloc(void **root,int size)
     *root = link;
     return link->data = alloc(size);
 }
-
 
 void qfree(void **root)
 {
@@ -78,26 +73,34 @@ void qfree(void **root)
     }
 }
 
-
-int min(int a,int b)
+int min(int a, int b)
 {
     return a < b ? a : b;
 }
 
-
-char get_key(char *valid,char *prompt)
+char get_key(char *valid, char *prompt)
 {
-    int ch,okay;
+    int ch, okay;
 
     while (1) {
-        if (prompt) printf("%s ",prompt);
+        if (prompt)
+            printf("%s ", prompt);
         fflush(stdout);
+
         while (ch = getchar(), ch == ' ' || ch == '\t');
-        if (ch == EOF) exit(1);
-        if (!strchr(valid,okay = ch)) okay = 0;
+        if (ch == EOF)
+            exit(1);
+
+        if (!strchr(valid, okay = ch))
+            okay = 0;
+
         while (ch = getchar(), ch != '\n' && ch != EOF);
-        if (ch == EOF) exit(1);
-        if (okay) return okay;
+        if (ch == EOF)
+            exit(1);
+
+        if (okay)
+            return okay;
+
         printf("Invalid input.\n");
     }
 }

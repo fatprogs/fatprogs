@@ -2,7 +2,6 @@
 
 /* Written 1993 by Werner Almesberger */
 
-
 #ifndef _BOOT_H
 #define _BOOT_H
 

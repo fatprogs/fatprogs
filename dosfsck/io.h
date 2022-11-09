@@ -5,7 +5,6 @@
 /* FAT32, VFAT, Atari format support, and various fixes additions May 1998
  * by Roman Hodek <Roman.Hodek@informatik.uni-erlangen.de> */
 
-
 #ifndef _IO_H
 #define _IO_H
 
@@ -15,39 +14,32 @@
  * sufficient (or even better :) for 64 bit offsets in the meantime */
 #define llseek lseek
 
-void fs_open(char *path,int rw);
-
 /* Opens the file system PATH. If RW is zero, the file system is opened
    read-only, otherwise, it is opened read-write. */
-
-void fs_read(loff_t pos,int size,void *data);
+void fs_open(char *path, int rw);
 
 /* Reads SIZE bytes starting at POS into DATA. Performs all applicable
    changes. */
-
-int fs_test(loff_t pos,int size);
+void fs_read(loff_t pos, int size, void *data);
 
 /* Returns a non-zero integer if SIZE bytes starting at POS can be read without
    errors. Otherwise, it returns zero. */
-
-void fs_write(loff_t pos,int size,void *data);
+int fs_test(loff_t pos, int size);
 
 /* If write_immed is non-zero, SIZE bytes are written from DATA to the disk,
    starting at POS. If write_immed is zero, the change is added to a list in
    memory. */
-
-int fs_close(int write);
+void fs_write(loff_t pos, int size, void *data);
 
 /* Closes the file system, performs all pending changes if WRITE is non-zero
    and removes the list of changes. Returns a non-zero integer if the file
    system has been changed since the last fs_open, zero otherwise. */
-
-int fs_changed(void);
+int fs_close(int write);
 
 /* Determines whether the file system has changed. See fs_close. */
-
-extern unsigned device_no;
+int fs_changed(void);
 
 /* Major number of device (0 if file) and size (in 512 byte sectors) */
+extern unsigned device_no;
 
 #endif

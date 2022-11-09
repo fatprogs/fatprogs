@@ -22,19 +22,17 @@
 #include "file.h"
 #include "check.h"
 
-
-int interactive = 0,list = 0,test = 0,verbose = 0,write_immed = 0;
+int interactive = 0, list = 0, test = 0, verbose = 0, write_immed = 0;
 int atari_format = 0;
 unsigned n_files = 0;
 void *mem_queue = NULL;
-
 
 static void usage(int error)
 {
     FILE *f = error ? stderr : stdout;
     int status = error ? 1 : 0;
 
-    fprintf(f,"usage: dosfslabel device [label]\n");
+    fprintf(f, "usage: dosfslabel device [label]\n");
     exit(status);
 }
 
@@ -42,30 +40,29 @@ static void usage(int error)
  * ++roman: On m68k, check if this is an Atari; if yes, turn on Atari variant
  * of MS-DOS filesystem by default.
  */
-static void check_atari( void )
+static void check_atari(void)
 {
 #ifdef __mc68000__
     FILE *f;
     char line[128], *p;
 
-    if (!(f = fopen( "/proc/hardware", "r" ))) {
-        perror( "/proc/hardware" );
+    if (!(f = fopen("/proc/hardware", "r"))) {
+        perror("/proc/hardware");
         return;
     }
 
-    while( fgets( line, sizeof(line), f ) ) {
-        if (strncmp( line, "Model:", 6 ) == 0) {
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "Model:", 6) == 0) {
             p = line + 6;
-            p += strspn( p, " \t" );
-            if (strncmp( p, "Atari ", 6 ) == 0)
+            p += strspn(p, " \t");
+            if (strncmp(p, "Atari ", 6) == 0)
                 atari_format = 1;
             break;
         }
     }
-    fclose( f );
+    fclose(f);
 #endif
 }
-
 
 int main(int argc, char *argv[])
 {
@@ -83,7 +80,7 @@ int main(int argc, char *argv[])
     if (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help"))
         usage(0);
     else if (!strcmp(argv[1], "-V") || !strcmp(argv[1], "--version")) {
-        printf( "dosfslabel " VERSION ", " VERSION_DATE ", FAT32, LFN\n" );
+        printf("dosfslabel " VERSION ", " VERSION_DATE ", FAT32, LFN\n");
         exit(0);
     }
 
