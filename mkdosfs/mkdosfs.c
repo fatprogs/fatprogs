@@ -153,6 +153,9 @@ inline __attribute__((always_inline)) int cdiv(int a, int b)
 #define MSDOS_FAT16_SIGN "FAT16   "	/* FAT16 filesystem signature */
 #define MSDOS_FAT32_SIGN "FAT32   "	/* FAT32 filesystem signature */
 
+#define LABEL_NONAME    "NO NAME    "
+#define LEN_VOLUME_LABEL    11
+
 #define BOOT_SIGN 0xAA55	/* Boot sector magic number */
 
 #define MAX_CLUST_12	((1 << 12) - 16)
@@ -181,7 +184,7 @@ struct msdos_volume_info {
     __u8        RESERVED;       /* Unused */
     __u8        ext_boot_sign;  /* 0x29 if fields below exist (DOS 3.3+) */
     __u8        volume_id[4];   /* Volume ID number */
-    __u8        volume_label[11];   /* Volume label */
+    __u8        volume_label[LEN_VOLUME_LABEL];   /* Volume label */
     __u8        fs_type[8];     /* Typically FAT12 or FAT16 */
 } __attribute__ ((packed));
 
@@ -292,7 +295,7 @@ static int check = FALSE;	/* Default to no readablity checking */
 static int verbose = 0;		/* Default to verbose mode off */
 static long volume_id;		/* Volume ID number */
 static time_t create_time;	/* Creation time */
-static char volume_name[] = "           "; /* Volume name */
+static char volume_name[] = LABEL_NONAME; /* Volume name */
 static unsigned long long blocks;	/* Number of blocks in filesystem */
 static int sector_size = 512;	/* Size of a logical sector */
 static int sector_size_set = 0; /* User selected sector size */
@@ -847,7 +850,7 @@ static void setup_tables(void)
     }
 
     if (!atari_format) {
-        memcpy(vi->volume_label, volume_name, 11);
+        memcpy(vi->volume_label, volume_name, LEN_VOLUME_LABEL);
 
         memcpy(bs.boot_jump, dummy_boot_jump, 3);
         /* Patch in the correct offset to the boot code */
@@ -1227,7 +1230,7 @@ static void setup_tables(void)
                     (int)(bs.dir_entries[0]) + (int)(bs.dir_entries[1]) * 256);
         printf ("Volume ID is %08lx, ", volume_id &
                 (atari_format ? 0x00ffffff : 0xffffffff));
-        if (strcmp(volume_name, "           "))
+        if (strcmp(volume_name, LABEL_NONAME))
             printf("volume label %s.\n", volume_name);
         else
             printf("no volume label.\n");
@@ -1258,10 +1261,10 @@ static void setup_tables(void)
     }
 
     memset(root_dir, 0, size_root_dir);
-    if (memcmp(volume_name, "           ", 11)) {
+    if (memcmp(volume_name, LABEL_NONAME, LEN_VOLUME_LABEL)) {
         struct msdos_dir_entry *de = &root_dir[0];
 
-        memcpy(de->name, volume_name, 11);
+        memcpy(de->name, volume_name, LEN_VOLUME_LABEL);
         de->attr = ATTR_VOLUME;
         ctime = localtime(&create_time);
         de->time = CT_LE_W((unsigned short)((ctime->tm_sec >> 1) +
