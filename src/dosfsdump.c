@@ -12,6 +12,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <errno.h>
 
 #include "common.h"
 #include "dosfs.h"
@@ -28,6 +29,8 @@ typedef enum dflag {
     DUMP_META,      /* Dump reserved sectors and FAT and Meta only */
     DUMP_ALL,       /* Dump ALL (include data) */
 } dflag_t;
+
+extern int errno;
 
 int fd_in;
 int fd_out;
@@ -433,10 +436,20 @@ static int dump__read_boot(DOS_FS *fs, struct boot_sector *b)
 
     /* read device size */
     device_size = lseek(fd_in, 0, SEEK_END);
-    if (lseek(fd_out, device_size, SEEK_SET) != device_size)
+    if (device_size < 0) {
+        printf("lseek error (%s)\n", strerror(errno));
         exit(-1);
+    }
 
-    write(fd_out, "0", 1);
+    if (lseek(fd_out, device_size, SEEK_SET) != device_size) {
+        printf("lseek error (%s)\n", strerror(errno));
+        exit(-1);
+    }
+
+    if (write(fd_out, "0", 1) < 0) {
+        printf("write error (%s)\n", strerror(errno));
+        exit(-1);
+    };
 
     /* read boot_sector */
     if (pread(fd_in, b, sizeof(struct boot_sector), 0) < 0)
