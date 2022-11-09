@@ -110,7 +110,10 @@ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
 	}
 	memset(de,0,sizeof(DIR_ENT));
 	while (1) {
-	    sprintf(de->name,pattern,curr_num);
+           char expanded[12];
+           sprintf(expanded, pattern, curr_num);
+           memcpy(de->name, expanded, 8);
+           memcpy(de->ext, expanded+8, 3);
 	    clu_num = fs->root_cluster;
 	    i = 0;
 	    offset2 = cluster_start(fs,clu_num);
@@ -150,7 +153,10 @@ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
 	offset = fs->root_start+next_free*sizeof(DIR_ENT);
 	memset(de,0,sizeof(DIR_ENT));
 	while (1) {
-	    sprintf(de->name,pattern,curr_num);
+	    char expanded[12];
+	    sprintf(expanded, pattern, curr_num);
+	    memcpy(de->name, expanded, 8);
+	    memcpy(de->ext, expanded+8, 3);
 	    for (scan = 0; scan < fs->root_entries; scan++)
 		if (scan != next_free &&
 		    !strncmp(root[scan].name,de->name,MSDOS_NAME))
