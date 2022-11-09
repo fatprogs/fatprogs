@@ -189,8 +189,10 @@ void lfn_add_slot(DIR_ENT *de, loff_t dir_offset)
                 if (can_clear)
                     printf("3: Clear start bit and concatenate LFNs\n");
             }
-            else
+            else {
                 printf("  Not auto-correcting this.\n");
+                remain_dirty = 1;
+            }
 
             if (interactive) {
                 switch (get_key(can_clear ? "123" : "12", "?")) {
@@ -234,8 +236,10 @@ void lfn_add_slot(DIR_ENT *de, loff_t dir_offset)
                     "2: Leave it as it is.\n"
                     "3: Set start bit\n");
         }
-        else
+        else {
             printf("  Not auto-correcting this.\n");
+            remain_dirty = 1;
+        }
 
         switch (interactive ? get_key("123", "?") : '2') {
             case '1':
@@ -286,8 +290,10 @@ void lfn_add_slot(DIR_ENT *de, loff_t dir_offset)
             if (can_fix)
                 printf("3: Correct sequence number\n");
         }
-        else
+        else {
             printf("  Not auto-correcting this.\n");
+            remain_dirty = 1;
+        }
 
         switch (interactive ? get_key(can_fix ? "123" : "12", "?") : '2') {
             case '1':
@@ -322,8 +328,10 @@ void lfn_add_slot(DIR_ENT *de, loff_t dir_offset)
                     "2: Leave it as it is.\n"
                     "3: Correct checksum\n");
         }
-        else
+        else {
             printf("  Not auto-correcting this.\n");
+            remain_dirty = 1;
+        }
 
         if (interactive) {
             switch (get_key("123", "?")) {
@@ -423,8 +431,10 @@ char *lfn_get(DIR_ENT *de)
                     "3: Fix numbering (truncates long name and attaches "
                     "it to short name %s)\n", short_name);
         }
-        else
+        else {
             printf("  Not auto-correcting this.\n");
+            remain_dirty = 1;
+        }
 
         switch (interactive ? get_key("123", "?") : '2') {
             case '1':
@@ -465,8 +475,10 @@ char *lfn_get(DIR_ENT *de)
                     "3: Fix checksum (attaches to short name %s)\n",
                     short_name);
         }
-        else
+        else {
             printf("  Not auto-correcting this.\n");
+            remain_dirty = 1;
+        }
 
         if (interactive) {
             switch (get_key("123", "?")) {

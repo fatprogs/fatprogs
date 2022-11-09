@@ -28,6 +28,9 @@ int interactive = 0, list = 0, test = 0, verbose = 0, write_immed = 0;
 int atari_format = 0;
 unsigned n_files = 0;
 void *mem_queue = NULL;
+
+/* TODO: separate code for not compiling uncessary file */
+int remain_dirty = 0;   /* Not used : for removing compile error */
 uint32_t max_clus_num;  /* Not used : for removing compile error */
 
 static void usage(int error)

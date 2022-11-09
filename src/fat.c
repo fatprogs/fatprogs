@@ -226,7 +226,7 @@ static void read_fat_cache(DOS_FS *fs, uint32_t cluster)
     loff_t aligned_offset;
 
     if (cluster > max_clus_num) {
-        die("cluster number is more than max cluster number. exit!\n");
+        die("Cluster number is more than max cluster number. exit!\n");
     }
 
     mmap_offset = fs->fat_start + cluster * fs->fat_bits / BITS_PER_BYTE;

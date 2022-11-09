@@ -34,6 +34,7 @@ label_t *label_head;
 label_t *label_last;
 
 extern int interactive, list, verbose, test, write_immed;
+extern int remain_dirty;
 extern int atari_format;
 extern unsigned n_files;
 extern void *mem_queue;

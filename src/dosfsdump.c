@@ -571,7 +571,8 @@ int main(int argc, char *argv[])
                 fat_num = atoi(optarg);
                 /* dump data using n-th FAT */
                 break;
-            case 'o':
+            case 'o':   /* specify output file */
+                /* TODO: to be implemented */
                 break;
             case 'v':
                 verbose = 1;
@@ -596,7 +597,7 @@ int main(int argc, char *argv[])
     fd_out = open(DUMP_FILENAME, O_RDWR | O_CREAT | O_TRUNC, 0666);
     if (fd_out < 0) {
         printf("Can't open output file('%s')\n", DUMP_FILENAME);
-        exit(-1);
+        exit(EXIT_FAILURE);
     }
 
     ret = dump__read_boot(&fs, &b);
@@ -615,7 +616,7 @@ int main(int argc, char *argv[])
 
     if (dump_flag <= DUMP_RESERVED) {
         printf("Dump reserved sectors only!\n");
-        exit(0);
+        exit(EXIT_SUCCESS);
     }
 
     dump_fats(&fs);
@@ -624,7 +625,7 @@ int main(int argc, char *argv[])
 
     if (dump_flag <= DUMP_FAT) {
         printf("Dump reserved sectors and FATs only!\n");
-        exit(0);
+        exit(EXIT_SUCCESS);
     }
 
     /* default buffer size is cluster size */

@@ -86,6 +86,20 @@ extern uint32_t max_clus_num;
 #define FAT32_DIRTY_BIT_MASK    0x8000000
 #define FAT16_DIRTY_BIT_MASK    0x8000
 
+#define FAT_BUF         (96 * 1024) /* 96K, Common Multiple(CM) of 12,16,32 fat size */
+#define FAT_CACHE_BUF   (4096)      /* for mmap, aligned page size for FAT cache */
+#define FAT_CACHE_SIZE  (FAT_CACHE_BUF)
+
+typedef enum {
+    EXIT_NO_ERRORS      = 0x00,
+    EXIT_CORRECTED      = 0x01,
+    EXIT_NOT_SUPPORT    = 0x02,
+    EXIT_ERRORS_LEFT    = 0x04,
+    EXIT_OPERATION_ERROR = 0x08,
+    EXIT_SYNTAX_ERROR   = 0x10,
+    EXIT_USER_CANCEL    = 0x20,
+} exit_type_t;
+
 /* __attribute__ ((packed)) is used on all structures to make gcc ignore any
  * alignments */
 struct volume_info {

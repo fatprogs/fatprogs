@@ -1316,6 +1316,7 @@ static int subdirs(DOS_FS *fs, DOS_FILE *parent, FDSC **cp)
             printf("%s\n  Invalid directory entry.(%d)\n"
                     "  Not auto-correcting this.\n",
                     path_name(walk), walk->dir_ent.attr);
+            remain_dirty = 1;
         }
     }
     return 0;

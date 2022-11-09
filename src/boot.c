@@ -173,8 +173,10 @@ static void check_backup_boot(DOS_FS *fs, struct boot_sector *b, int lss)
             printf("1) Copy original to backup\n"
                     "2) Copy backup to original\n"
                     "3) No action\n");
-        else
+        else {
             printf("  Not automatically fixing this.\n");
+            remain_dirty = 1;
+        }
 
         switch (interactive ? get_key("123", "?") : '3') {
             case '1':
@@ -207,8 +209,10 @@ static void read_fsinfo(DOS_FS *fs, struct boot_sector *b, int lss)
 
         if (interactive)
             printf("1) Create one\n2) Do without FSINFO\n");
-        else
+        else {
             printf("  Not automatically creating it.\n");
+            remain_dirty = 1;
+        }
 
         if (interactive && get_key("12", "?") == '1') {
             /* search for a free reserved sector (not boot sector and not
@@ -326,7 +330,7 @@ void read_boot(DOS_FS *fs)
         ROUND_TO_MULTIPLE(fs->root_entries << MSDOS_DIR_BITS, logical_sector_size);
     data_size = (off_t)total_sectors * logical_sector_size - fs->data_start;
     fs->clusters = data_size / fs->cluster_size;    /* total number of clusters */
-    max_clus_num = fs->clusters + FAT_START_ENT;    /* maximun cluster no. */
+    max_clus_num = fs->clusters + FAT_START_ENT;    /* maximum cluster no. */
     fs->root_cluster = 0;   /* indicates standard, pre-FAT32 root dir */
     fs->fsinfo_start = 0;   /* no FSINFO structure */
     fs->free_clusters = -1; /* unknown */

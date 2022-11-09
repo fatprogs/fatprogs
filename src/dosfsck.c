@@ -28,6 +28,7 @@ int interactive = 0, list = 0, test = 0, verbose = 0, write_immed = 0;
 int check_dirty = 0;
 int check_dirty_only = 0;
 int atari_format = 0;
+int remain_dirty = 0;
 unsigned n_files = 0;
 void *mem_queue = NULL;
 
@@ -172,7 +173,8 @@ int main(int argc, char **argv)
     free_clusters = update_free(&fs);
     file_unused();
 
-    clean_dirty_flag(&fs);
+    if (!remain_dirty)
+        clean_dirty_flag(&fs);
 
     if (verbose) {
         print_mem();
@@ -189,7 +191,8 @@ int main(int argc, char **argv)
         scan_root(&fs);
         check_volume_label(&fs);
         reclaim_free(&fs);
-        clean_dirty_flag(&fs);
+        if (!remain_dirty)
+            clean_dirty_flag(&fs);
         if (verbose)
             print_mem();
 
@@ -215,7 +218,11 @@ int main(int argc, char **argv)
         fs_munmap(fs.fat_cache.addr, FAT_CACHE_SIZE);
     }
 
-    return fs_close(rw) ? 1 : 0;
+    ret = fs_close(rw);
+    if (remain_dirty)
+        return EXIT_ERRORS_LEFT;
+
+    return (ret ? EXIT_CORRECTED : EXIT_NO_ERRORS);
 }
 
 /* Local Variables: */

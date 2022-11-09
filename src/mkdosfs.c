@@ -82,10 +82,6 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA. */
  * sufficient (or even better :) for 64 bit offsets in the meantime */
 #define llseek lseek
 
-/* Constant definitions */
-#define TRUE 1			/* Boolean constants */
-#define FALSE 0
-
 #define TEST_BUFFER_BLOCKS 16
 #define HARD_SECTOR_SIZE   512
 #define SECTORS_PER_BLOCK (BLOCK_SIZE / HARD_SECTOR_SIZE)
