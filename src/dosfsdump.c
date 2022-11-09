@@ -640,4 +640,7 @@ int main(int argc, char *argv[])
     free_mem(buf_clus);
 
     clean_dump(&fs);
+
+    close(fd_in);
+    close(fd_out);
 }

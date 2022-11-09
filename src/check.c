@@ -2407,6 +2407,7 @@ int check_dirty_flag(DOS_FS *fs)
     return 0;
 }
 
+/* called after fs_flush, must do not use fs_write(). */
 void clean_dirty_flag(DOS_FS *fs)
 {
     uint32_t value;
@@ -2443,14 +2444,14 @@ void clean_dirty_flag(DOS_FS *fs)
             case '1':
                 if (fs->fat_state & FAT_STATE_DIRTY) {
                     vi->state &= ~FAT_STATE_DIRTY;
-                    fs_write(0, sizeof(b), &b);
+                    fs_write_immed(0, sizeof(b), &b);
                 }
+                fs->fat_state &= ~FAT_STATE_DIRTY;
 
                 if (!(value & dirty_mask)) {
-                    set_fat(fs, 1, value | dirty_mask);
+                    set_fat_immed(fs, 1, value | dirty_mask);
                 }
 
-                fs->fat_state &= ~FAT_STATE_DIRTY;
                 break;
             case '2':
                 break;

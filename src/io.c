@@ -233,22 +233,29 @@ void print_changes(void)
         printf("None\n");
 }
 
+void fs_write_immed(loff_t pos, int size, void *data)
+{
+    int did;
+
+    if ((did = pwrite(fd, data, size, pos)) == size)
+        return;
+
+    if (did < 0)
+        pdie("Write %d bytes at %lld", size, pos);
+
+    die("Wrote %d bytes instead of %d at %lld", did, size, pos);
+}
+
 void fs_write(loff_t pos, int size, void *data)
 {
     CHANGE *new;
     CHANGE *walk;
     CHANGE *prev;
     CHANGE *merge;
-    int did;
 
     if (write_immed) {
         did_change = 1;
-        if ((did = pwrite(fd, data, size, pos)) == size)
-            return;
-        if (did < 0)
-            pdie("Write %d bytes at %lld(%d,%s)", size, pos, __LINE__, __func__);
-
-        die("Wrote %d bytes instead of %d at %lld", did, size, pos);
+        fs_write_immed(pos, size, data);
     }
 
     new = alloc_mem(sizeof(CHANGE));
@@ -347,7 +354,7 @@ void fs_write(loff_t pos, int size, void *data)
     }
 }
 
-static void fs_flush(void)
+static void __fs_flush(void)
 {
     CHANGE *this;
     int size;
@@ -366,26 +373,31 @@ static void fs_flush(void)
     }
 }
 
-int fs_close(int write)
+int fs_flush(int write)
 {
     CHANGE *next;
     int changed;
 
     changed = !!changes;
     if (write)
-        fs_flush();
-    else
+        __fs_flush();
+    else {
+        /* do not write and free changes */
         while (changes) {
             next = changes->next;
             free_mem(changes->data);
             free_mem(changes);
             changes = next;
         }
+    }
+    fsync(fd);
+    return changed || did_change;
+}
 
+void fs_close(void)
+{
     if (close(fd) < 0)
         pdie("closing file system");
-
-    return changed || did_change;
 }
 
 int fs_changed(void)

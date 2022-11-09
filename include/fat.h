@@ -34,6 +34,7 @@ void dec_alloc_cluster(void);
    values of NEW are -1 (EOF, 0xff8 or 0xfff8) and -2 (bad sector, 0xff7 or
    0xfff7) */
 void set_fat(DOS_FS *fs, uint32_t cluster, uint32_t new);
+void set_fat_immed(DOS_FS *fs, uint32_t cluster, uint32_t new);
 
 /* Returns a non-zero integer if the CLUSTERth cluster is marked as bad or zero
    otherwise. */

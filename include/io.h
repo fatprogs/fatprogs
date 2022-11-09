@@ -35,11 +35,13 @@ int fs_test(loff_t pos, int size);
    starting at POS. If write_immed is zero, the change is added to a list in
    memory. */
 void fs_write(loff_t pos, int size, void *data);
+void fs_write_immed(loff_t pos, int size, void *data);
 
+int fs_flush(int write);
 /* Closes the file system, performs all pending changes if WRITE is non-zero
    and removes the list of changes. Returns a non-zero integer if the file
    system has been changed since the last fs_open, zero otherwise. */
-int fs_close(int write);
+void fs_close(void);
 
 /* Determines whether the file system has changed. See fs_close. */
 int fs_changed(void);

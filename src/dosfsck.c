@@ -173,9 +173,6 @@ int main(int argc, char **argv)
     free_clusters = update_free(&fs);
     file_unused();
 
-    if (!remain_dirty)
-        clean_dirty_flag(&fs);
-
     if (verbose) {
         print_mem();
 #ifdef DEBUG
@@ -191,8 +188,6 @@ int main(int argc, char **argv)
         scan_root(&fs);
         check_volume_label(&fs);
         reclaim_free(&fs);
-        if (!remain_dirty)
-            clean_dirty_flag(&fs);
         if (verbose)
             print_mem();
 
@@ -218,7 +213,16 @@ int main(int argc, char **argv)
         fs_munmap(fs.fat_cache.addr, FAT_CACHE_SIZE);
     }
 
-    ret = fs_close(rw);
+    /* sync for modified data */
+    ret = fs_flush(rw);
+
+    if (!remain_dirty)
+        clean_dirty_flag(&fs);
+
+    /* sync for dirty flag */
+    fs_flush(rw);
+
+    fs_close();
     if (remain_dirty)
         return EXIT_ERRORS_LEFT;
 

@@ -327,12 +327,14 @@ void get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value)
     }
 }
 
-void set_fat(DOS_FS *fs, uint32_t cluster, uint32_t new)
+/* immed : write immediately flag */
+void __set_fat(DOS_FS *fs, uint32_t cluster, uint32_t new, int immed)
 {
     unsigned char data[4];
     loff_t offset;
     int clus_size;
     int i;
+    void (*fat_write)(loff_t pos, int size, void *data);
 
     if ((int32_t)new == -1)
         new = FAT_EOF(fs);
@@ -383,10 +385,25 @@ void set_fat(DOS_FS *fs, uint32_t cluster, uint32_t new)
             die("Bad FAT entry size: %d bits.", fs->fat_bits);
     }
 
-    fs_write(offset, clus_size, &data);
+    if (immed)
+        fat_write = fs_write_immed;
+    else
+        fat_write = fs_write;
+
+    fat_write(offset, clus_size, &data);
     for (i = 1; i < fs->nfats; i++) {
-        fs_write(offset + (fs->fat_size * i), clus_size, &data);
+        fat_write(offset + (fs->fat_size * i), clus_size, &data);
     }
+}
+
+void set_fat_immed(DOS_FS *fs, uint32_t cluster, uint32_t new)
+{
+    __set_fat(fs, cluster, new, TRUE);
+}
+
+void set_fat(DOS_FS *fs, uint32_t cluster, uint32_t new)
+{
+    __set_fat(fs, cluster, new, FALSE);
 }
 
 int bad_cluster(DOS_FS *fs, uint32_t cluster)

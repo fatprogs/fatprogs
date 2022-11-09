@@ -47,6 +47,7 @@ int main(int argc, char *argv[])
     DOS_FS fs;
     int rw = 0;
     int save_nfats = 0;
+    int ret = 0;
 
     char *device = NULL;
     char *label = NULL;
@@ -112,5 +113,8 @@ int main(int argc, char *argv[])
 
 out:
     clean_boot(&fs);
-    return fs_close(rw) ? 1 : 0;
+
+    ret = fs_flush(rw);
+    fs_close();
+    return (ret ? EXIT_FAILURE : EXIT_SUCCESS);
 }
