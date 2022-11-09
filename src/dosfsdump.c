@@ -15,9 +15,6 @@
 
 #include "common.h"
 #include "dosfs.h"
-#include "io.h"
-#include "fat.h"
-#include "boot.h"
 
 #define DUMP_FILENAME   "./dump.file"
 
@@ -46,84 +43,132 @@ char *buf_sec = NULL;
 
 static void traverse_tree(DOS_FS *fs, uint32_t clus_num, int attr);
 
-static inline loff_t CLUSTER_OFFSET(DOS_FS *fs, uint32_t clus_num)
+/* same function for dosfsdump */
+static inline void dump__get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value)
+{
+    loff_t offset;
+    int clus_size;
+
+    switch (fs->fat_bits) {
+        case 12: {
+            unsigned char data[2] = {0, };
+
+            clus_size = 2;
+            offset = fs->fat_start + cluster * 3 / 2;
+            if (lseek(fd_in, offset, SEEK_SET) != offset)
+                pdie("Seek to %lld of input(%d,%s)", offset, __LINE__, __func__);
+
+            if (read(fd_in, data, clus_size) < 0)
+                pdie("Read %d bytes at %lld(%d,%s)", clus_size, offset, __LINE__, __func__);
+
+            *value = 0xfff & (cluster & 1 ? (data[0] >> 4) | (data[1] << 4) :
+                    (data[0] | data[1] << 8));
+            break;
+        }
+        case 16: {
+            unsigned short data = 0;
+
+            clus_size = 2;
+            offset = fs->fat_start + cluster * clus_size;
+            if (lseek(fd_in, offset, SEEK_SET) != offset)
+                pdie("Seek to %lld of input(%d,%s)", offset, __LINE__, __func__);
+
+            if (read(fd_in, (void *)&data, clus_size) < 0)
+                pdie("Read %d bytes at %lld(%d,%s)", clus_size, offset, __LINE__, __func__);
+
+            *value = CF_LE_W(data);
+            break;
+        }
+        case 32: {
+            uint32_t data = 0;
+
+            clus_size = 4;
+            offset = fs->fat_start + cluster * clus_size;
+            if (lseek(fd_in, offset, SEEK_SET) != offset)
+                pdie("Seek to %lld of input(%d,%s)", offset, __LINE__, __func__);
+
+            if (read(fd_in, (void *)&data, clus_size) < 0)
+                pdie("Read %d bytes at %lld(%d,%s)", clus_size, offset, __LINE__, __func__);
+
+            /* According to MS, the high 4 bits of a FAT32 entry are reserved and
+             * are not part of the cluster number. So we cut them off. */
+            data = CF_LE_L(data);
+            *value = data & 0x0fffffff;
+            break;
+        }
+        default:
+            die("Bad FAT entry size: %d bits.", fs->fat_bits);
+    }
+
+}
+
+static inline loff_t dump__cluster_start(DOS_FS *fs, uint32_t clus_num)
 {
     return fs->data_start +
         ((loff_t)clus_num - FAT_START_ENT) * (unsigned long long)fs->cluster_size;
 }
 
-static inline uint32_t NEXT_CLUSTER(DOS_FS *fs, uint32_t clus_num)
+static inline uint32_t dump__next_cluster(DOS_FS *fs, uint32_t clus_num)
 {
     uint32_t value;
 
-    value = fs->fat[clus_num].value;
+    dump__get_fat(fs, clus_num, &value);
     if (FAT_IS_BAD(fs, value))
         return -1;
     else
         return FAT_IS_EOF(fs, value) ? -1 : value;
 }
+/**/
 
-static inline void GET_FAT_ENTRY(FAT_ENTRY *entry,
-        void *fat, uint32_t cluster, DOS_FS *fs)
-{
-    unsigned char *ptr;
-
-    switch (fs->fat_bits) {
-        case 12:
-            ptr = &((unsigned char *) fat)[cluster * 3 / 2];
-            entry->value = 0xfff & (cluster & 1 ? (ptr[0] >> 4) | (ptr[1] << 4) :
-                    (ptr[0] | ptr[1] << 8));
-            break;
-        case 16:
-            entry->value = CF_LE_W(((unsigned short *)fat)[cluster]);
-            break;
-        case 32:
-            /* According to M$, the high 4 bits of a FAT32 entry are reserved and
-             * are not part of the cluster number. So we cut them off. */
-            {
-                uint32_t e = CF_LE_L(((unsigned int *)fat)[cluster]);
-                entry->value = e & 0xfffffff;
-                entry->reserved = e >> 28;
-            }
-            break;
-        default:
-            die("Bad FAT entry size: %d bits.", fs->fat_bits);
-    }
-}
-
-void dump_area(loff_t pos, int size, void *data)
+static void dump_area(loff_t pos, int size, void *data)
 {
     int ret = 0;
 
-    if (llseek(fd_in, pos, SEEK_SET) != pos)
-        pdie("Seek to %lld of input", pos);
+    if (lseek(fd_in, pos, SEEK_SET) != pos)
+        pdie("Seek to %lld of input(%d,%s)", pos, __LINE__, __func__);
 
     if ((ret = read(fd_in, data, size)) < 0)
         pdie("Read %d bytes at %lld", size, pos);
 
     if (ret != size)
-        die("Read %d bytes instead of %d at %lld", ret, size, pos);
+        die("Read %d bytes instead of %d at %lld(%d,%s)", ret, size, pos, __LINE__, __func__);
 
-    if (llseek(fd_out, pos, SEEK_SET) != pos)
+    if (lseek(fd_out, pos, SEEK_SET) != pos)
         pdie("Seek to %lld of output", pos);
 
     if ((ret = write(fd_out, data, size)) < 0)
-        pdie("Write %d bytes at %lld", size, pos);
+        pdie("Write %d bytes at %lld(%d,%s)", size, pos, __LINE__, __func__);
 
     if (ret != size)
-        die("Write %d bytes instead of %d at %lld", ret, size, pos);
+        die("Write %d bytes instead of %d at %lld(%d,%s)", ret, size, pos, __LINE__, __func__);
 }
 
 static void dump_orphaned(DOS_FS *fs)
 {
     loff_t clus_offset;
     int i;
+    uint32_t next_clus;
 
     /* check fat entry that is not zero */
 
-    for (i = FAT_START_ENT; i < fs->clusters + 2; i++) {
-        if (fs->fat[i].value != 0) {
-            clus_offset = CLUSTER_OFFSET(fs, fs->fat[i].value);
+    for (i = 0; i < (fs->bitmap_size / sizeof(long)); i++) {
+        fs->real_bitmap[i] ^= fs->bitmap[i];
+    }
+
+    for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
+
+        if (i % BITS_PER_LONG == 0 && fs->real_bitmap[i / BITS_PER_LONG] == 0) {
+            i = ((i / BITS_PER_LONG) * BITS_PER_LONG) + BITS_PER_LONG - 1;
+            continue;
+        }
+
+        if (!test_bit(i, fs->real_bitmap)) {
+            continue;
+        }
+
+        dump__get_fat(fs, i, &next_clus);
+        if (next_clus && next_clus < fs->clusters + FAT_START_ENT) {
+            clus_offset = dump__cluster_start(fs, next_clus);
             dump_area(clus_offset, fs->cluster_size, buf_clus);
         }
     }
@@ -133,17 +178,18 @@ static void __traverse_file(DOS_FS *fs, uint32_t clus_num)
 {
     uint32_t cluster;
     loff_t clus_offset;
-    uint32_t prev_clus = 0;
 
     cluster = clus_num;
 
     do {
-        clus_offset = CLUSTER_OFFSET(fs, cluster);
+        if (test_bit(cluster, fs->real_bitmap))
+            break;
+        set_bit(cluster, fs->real_bitmap);
+
+        clus_offset = dump__cluster_start(fs, cluster);
         dump_area(clus_offset, fs->cluster_size, buf_clus);
 
-        prev_clus = cluster;
-        cluster = NEXT_CLUSTER(fs, cluster);
-        fs->fat[prev_clus].value = 0;
+        cluster = dump__next_cluster(fs, cluster);
 
     } while (cluster > 0 && cluster < fs->clusters + FAT_START_ENT);
 }
@@ -155,31 +201,35 @@ static void __traverse_dir(DOS_FS *fs, uint32_t clus_num)
     loff_t clus_offset;
     int offset = 0;
     uint32_t sub_clus;
-    uint32_t prev_clus;
+
+    set_bit(clus_num, fs->real_bitmap);
 
     /* clus_num parameter is valid, already checked before being called */
-    clus_offset = CLUSTER_OFFSET(fs, clus_num);
+    clus_offset = dump__cluster_start(fs, clus_num);
     dump_area(clus_offset, fs->cluster_size, buf_clus);
 
     while (clus_num > 0 && clus_num != -1) {
-        if (llseek(fd_in, clus_offset + offset, SEEK_SET) !=
+        if (lseek(fd_in, clus_offset + offset, SEEK_SET) !=
                 clus_offset + offset)
-            pdie("Seek to %lld of input", clus_offset + offset);
+            pdie("Seek to %lld of input(%d,%s)", clus_offset + offset, __LINE__, __func__);
 
         if (read(fd_in, &de, sizeof(DIR_ENT)) < 0)
-            pdie("Read %d bytes at %lld", sizeof(DIR_ENT), clus_offset);
+            pdie("Read %d bytes at %lld(%d,%s)",
+                    sizeof(DIR_ENT), clus_offset, __LINE__, __func__);
 
         offset += sizeof(DIR_ENT);
         if (!(offset % fs->cluster_size)) {
-            prev_clus = clus_num;
-            if ((clus_num = NEXT_CLUSTER(fs, clus_num)) == 0 ||
+            if ((clus_num = dump__next_cluster(fs, clus_num)) == 0 ||
                     clus_num == -1) {
-                fs->fat[prev_clus].value = 0;
                 break;
             }
 
-            fs->fat[prev_clus].value = 0;
-            clus_offset = CLUSTER_OFFSET(fs, clus_num);
+            offset = 0;
+            if (test_bit(clus_num, fs->real_bitmap))
+                continue;
+            set_bit(clus_num, fs->real_bitmap);
+
+            clus_offset = dump__cluster_start(fs, clus_num);
             dump_area(clus_offset, fs->cluster_size, buf_clus);
         }
 
@@ -220,7 +270,7 @@ static void dump_data(DOS_FS *fs)
 
     /* dump root cluster */
     if (fs->root_cluster) {
-        clus_offset = CLUSTER_OFFSET(fs, fs->root_cluster);
+        clus_offset = dump__cluster_start(fs, fs->root_cluster);
     }
     else {
         clus_offset = fs->root_start;
@@ -228,7 +278,7 @@ static void dump_data(DOS_FS *fs)
 
     offset = clus_offset % fs->cluster_size;
     if (offset) {
-        die("clus_offset is not valid");
+        printf("WARN: root cluster does not aligned cluster size\n");
     }
 
     if (fs->root_cluster) {
@@ -238,15 +288,15 @@ static void dump_data(DOS_FS *fs)
         dump_area(clus_offset, fs->cluster_size, buf_clus);
 
         for (i = 0; i < fs->root_entries; i++) {
-            if (llseek(fd_in, clus_offset + i * sizeof(DIR_ENT), SEEK_SET) !=
+            if (lseek(fd_in, clus_offset + i * sizeof(DIR_ENT), SEEK_SET) !=
                     clus_offset + i * sizeof(DIR_ENT)) {
-                pdie("Seek to %lld of input",
-                        clus_offset + i * sizeof(DIR_ENT));
+                pdie("Seek to %lld of input(%d,%s)",
+                        clus_offset + i * sizeof(DIR_ENT), __LINE__, __func__);
             }
 
             if (read(fd_in, &de, sizeof(DIR_ENT)) < 0) {
-                pdie("Read %d bytes at %lld", sizeof(DIR_ENT),
-                        clus_offset + i * sizeof(DIR_ENT));
+                pdie("Read %d bytes at %lld(%d,%s)", sizeof(DIR_ENT),
+                        clus_offset + i * sizeof(DIR_ENT), __LINE__, __func__);
             }
 
             if (IS_FREE(de.name) || IS_LFN_ENT(de.attr) ||
@@ -266,43 +316,68 @@ static void dump_data(DOS_FS *fs)
 }
 
 /* It's for dosfsdump, read just one fat 1st or selected. */
-void __read_fat_dump(DOS_FS *fs)
+static void dump__read_fat(DOS_FS *fs)
 {
-    void *fat;
-    int size;
-    int i;
-    loff_t fat_offset = 0;
+    int fat_size;
+    int read_size;
+    loff_t offset = 0;
+    loff_t start_offset = 0;
+    int remain_size;
+    int num_cluster;
+    int total_cluster = 0;
+    char *fat = NULL;
+    uint32_t clus_num;
+    uint32_t start = FAT_START_ENT; /* skip 0 and 1-th cluster of FAT */
 
-    /* 2 == FAT_START_ENT */
-    size = ((fs->clusters + 2ULL) * fs->fat_bits + 7) / 8ULL;
-    fat = alloc_mem(size);
+    /* 2 represents FAT_START_ENT */
+    fat_size = ((fs->clusters + 2ULL) * fs->fat_bits + 7) / BITS_PER_BYTE;
+    fs->bitmap_size = (fat_size + 7) / BITS_PER_BYTE;
 
-    fat_offset = fs->fat_start;
+    read_size = min(DEFAULT_FAT_BUF, fat_size);
+    fat = alloc_mem(read_size);
+
+    remain_size = fat_size;
+
+    start_offset = fs->fat_start;
     if (fat_num && fat_num < fs->nfats) {
-        fat_offset = fs->fat_start + fs->fat_size * fat_num;
+        start_offset = fs->fat_start + fs->fat_size * fat_num;
     }
 
-    if (llseek(fd_in, fat_offset, SEEK_SET) != fat_offset)
-        pdie("Seek to %lld of input", fat_offset);
+    fs->bitmap = alloc_mem(fs->bitmap_size);
+    fs->real_bitmap = alloc_mem(fs->bitmap_size);
 
-    if (read(fd_in, fat, size) < 0)
-        pdie("Read %d bytes at %lld", size, fat_offset);
+    while (remain_size > 0) {
+        int i;
 
-    fs->fat = alloc_mem(sizeof(FAT_ENTRY) * (fs->clusters + 2ULL));
+        if (lseek(fd_in, start_offset + offset, SEEK_SET) !=
+                start_offset + offset)
+            pdie("Seek to %lld of input(%d,%s)", start_offset + offset, __LINE__, __func__);
 
-    for (i = 0; i < FAT_START_ENT; i++) {
-        GET_FAT_ENTRY(&fs->fat[i], fat, i, fs);
-    }
+        if (read(fd_in, fat, read_size) < 0)
+            pdie("Read %d bytes at %lld(%d,%s)",
+                    read_size, start_offset + offset, __LINE__, __func__);
 
-    for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
-        GET_FAT_ENTRY(&fs->fat[i], fat, i, fs);
+        num_cluster = read_size / fs->fat_bits;
+        for (i = start; i < num_cluster; i++) {
+            dump__get_fat(fs, total_cluster + i, &clus_num);
+            if (!clus_num)
+                continue;
+            if (clus_num >= fs->clusters + FAT_START_ENT &&
+                    clus_num < FAT_MIN_BAD(fs)) {
+                printf("WARN: Cluster %u out of range (%u > %u). Setting to EOF.\n",
+                        i, clus_num, fs->clusters + FAT_START_ENT - 1);
+                continue;
+            }
 
-        if (fs->fat[i].value >= fs->clusters + FAT_START_ENT &&
-                (fs->fat[i].value < FAT_MIN_BAD(fs))) {
-            printf("Cluster %u out of range (%u > %u). Setting to EOF.\n",
-                    i, fs->fat[i].value, fs->clusters + FAT_START_ENT - 1);
-            fs->fat[i].value = 0;
+            /* set bitmap only valid cluster */
+            set_bit(total_cluster + i, fs->bitmap);
         }
+
+        start = 0;
+        total_cluster += num_cluster;
+        remain_size -= read_size;
+        if (remain_size < read_size)
+            read_size = remain_size;
     }
 
     free_mem(fat);
@@ -312,45 +387,45 @@ static void dump_fats(DOS_FS *fs)
 {
     int i, j;
 
-    if (llseek(fd_in, fs->fat_start, SEEK_SET) != fs->fat_start)
-        pdie("Seek to %lld of input", fs->fat_start);
+    if (lseek(fd_in, fs->fat_start, SEEK_SET) != fs->fat_start)
+        pdie("Seek to %lld of input(%d,%s)", fs->fat_start, __LINE__, __func__);
 
-    if (llseek(fd_out, fs->fat_start, SEEK_SET) != fs->fat_start)
-        pdie("Seek to %lld of input", fs->fat_start);
+    if (lseek(fd_out, fs->fat_start, SEEK_SET) != fs->fat_start)
+        pdie("Seek to %lld of input(%d,%s)", fs->fat_start, __LINE__, __func__);
 
     for (i = 0; i < fs->nfats; i++) {
         for (j = 0; j < sec_per_fat; j++) {
             if (read(fd_in, buf_sec, sector_size) < 0)
-                pdie("Read FAT");
+                pdie("Read FAT(%d,%s)", __LINE__, __func__);
 
             if (write(fd_out, buf_sec, sector_size) < 0)
-                pdie("Write FAT");
+                pdie("Write FAT(%d,%s)", __LINE__, __func__);
         }
     }
 
-    __read_fat_dump(fs);
+    dump__read_fat(fs);
 }
 
 static void dump_reserved(DOS_FS *fs)
 {
     int i;
 
-    if (llseek(fd_in, 0, SEEK_SET) != 0)
-        pdie("Seek to %lld of input", 0);
+    if (lseek(fd_in, 0, SEEK_SET) != 0)
+        pdie("Seek to %lld of input(%d,%s)", 0, __LINE__, __func__);
 
-    if (llseek(fd_out, 0, SEEK_SET) != 0)
-        pdie("Seek to %lld of input", 0);
+    if (lseek(fd_out, 0, SEEK_SET) != 0)
+        pdie("Seek to %lld of input(%d,%s)", 0, __LINE__, __func__);
 
     for (i = 0; i < reserved_cnt; i++) {
         if (read(fd_in, buf_sec, sector_size) < 0)
-            pdie("Read reserved sector");
+            pdie("Read reserved sector(%d,%s)", __LINE__, __func__);
 
         if (write(fd_out, buf_sec, sector_size) < 0)
-            pdie("Write reserved sector");
+            pdie("Write reserved sector(%d,%s)", __LINE__, __func__);
     }
 }
 
-static int read_boot_dump(DOS_FS *fs, struct boot_sector *b)
+static int dump__read_boot(DOS_FS *fs, struct boot_sector *b)
 {
     unsigned int total_sectors;
     unsigned short sectors;
@@ -362,11 +437,12 @@ static int read_boot_dump(DOS_FS *fs, struct boot_sector *b)
     int change_flag = 0;
 
     /* read boot_sector */
-    if (llseek(fd_in, 0, SEEK_SET) != 0)
-        pdie("Seek to %lld of input", 0);
+    if (lseek(fd_in, 0, SEEK_SET) != 0)
+        pdie("Seek to %lld of input(%d,%s)", 0, __LINE__, __func__);
 
     if (read(fd_in, b, sizeof(struct boot_sector)) < 0)
-        pdie("Read %d bytes at %lld", sizeof(struct boot_sector), 0);
+        pdie("Read %d bytes at %lld(%d,%s)",
+                sizeof(struct boot_sector), 0, __LINE__, __func__);
 
     reserved_cnt = CF_LE_W(b->reserved_cnt);
     sector_size = GET_UNALIGNED_W(b->sector_size);
@@ -379,6 +455,7 @@ static int read_boot_dump(DOS_FS *fs, struct boot_sector *b)
     }
 
     fs->cluster_size = b->sec_per_clus * sector_size;
+
 retry:
     if (!fs->cluster_size) {
         /* Can't dump all blocks, just dump reserved sectors only */
@@ -397,7 +474,7 @@ retry:
 
     /* Can't access last odd sector anyway, so round down */
     last_offset = (off_t)((total_sectors & ~1) - 1) * (off_t)sector_size;
-    ret = llseek(fd_in, last_offset, SEEK_SET);
+    ret = lseek(fd_in, last_offset, SEEK_SET);
     if (ret != last_offset) {
         /* Can't dump all blocks, just dump reserved and FAT only */
         dump_flag = DUMP_FAT;
@@ -429,7 +506,6 @@ retry:
 
         fs->backupboot_start = CF_LE_W(b->fat32.backup_boot) * sector_size;
         /* TODO: if main boot sector is corrupted, use backup boot */
-//        check_backup_boot(fs, &b, sector_size);
     }
     else if (!atari_format) {
         /* On real MS-DOS, a 16 bit FAT is used whenever there would be too
@@ -451,7 +527,7 @@ retry:
 
         /* If more clusters than fat entries in 16-bit fat, we assume
          * it's a real MSDOS FS with 12-bit fat. */
-        if (fs->clusters + 2 > sec_per_fat * sector_size * 8 / 16 ||
+        if (fs->clusters + FAT_START_ENT > sec_per_fat * sector_size * 8 / 16 ||
                 /* if it's a floppy disk --> 12bit fat */
                 device_no == 2 ||
                 /* if it's a ramdisk or loopback device and has one of the usual
@@ -502,8 +578,11 @@ static void usage(char *name)
 
 void clean_dump(DOS_FS *fs)
 {
-    if (fs->fat)
-        free_mem(fs->fat);
+    if (fs->bitmap)
+        free_mem(fs->bitmap);
+
+    if (fs->real_bitmap)
+        free_mem(fs->real_bitmap);
 }
 
 int main(int argc, char *argv[])
@@ -549,7 +628,7 @@ int main(int argc, char *argv[])
         exit(-1);
     }
 
-    ret = read_boot_dump(&fs, &b);
+    ret = dump__read_boot(&fs, &b);
     if (ret) {
         /* TODO */
         //__read_boot_dump(&fs);
@@ -589,5 +668,4 @@ int main(int argc, char *argv[])
     free_mem(buf_clus);
 
     clean_dump(&fs);
-
 }
