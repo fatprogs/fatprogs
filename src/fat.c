@@ -27,23 +27,18 @@ void set_exclusive_bitmap(DOS_FS *fs)
     unsigned int i;
 
     /* bitmap : read from disk(FAT)
-     * real_bitmap : set by traversing file tree
-     * reclaim_bitmap : not used */
-
-    memcpy(fs->reclaim_bitmap, fs->real_bitmap, fs->bitmap_size);
+     * real_bitmap : set by traversing file tree */
 
     /* After exclusive OR operation,
-     * remained bits represent orphaned clusters */
+     * bits represent orphaned clusters */
     for (i = 0; i < (fs->bitmap_size / sizeof(long)); i++) {
         fs->real_bitmap[i] ^= fs->bitmap[i];
     }
 
-    memcpy(fs->bitmap, fs->reclaim_bitmap, fs->bitmap_size);
-    memset(fs->reclaim_bitmap, 0, fs->bitmap_size);
+    memset(fs->bitmap, 0, fs->bitmap_size);
 
-    /* bitmap : real_bitmap backup
-     * real_bitmap : orphan clusters set
-     * reclaim_bitmap : zero cleared for reclaimed cluster */
+    /* bitmap : read from disk --> zero cleared for reclaimed cluster
+     * real_bitmap : represent orphan clusters set */
 }
 
 static void init_fat_cache(DOS_FS *fs)
@@ -103,7 +98,6 @@ void read_fat(DOS_FS *fs)
     /* make bitmap from selected FAT */
     fs->bitmap = qalloc(&mem_queue, bitmap_size);
     fs->real_bitmap = qalloc(&mem_queue, bitmap_size);
-    fs->reclaim_bitmap = qalloc(&mem_queue, bitmap_size);
 
     init_fat_cache(fs);
 
@@ -455,42 +449,38 @@ inline void dec_alloc_cluster(void)
     alloc_clusters--;
 }
 
+/* set_bitmap_reclaim() clear_bitmap_reclaim() should be called
+ * in reclaim function after set_exclusive_bitmap().
+ * because fs->bitmap preserve FAT bits from disk until
+ * set_exclusive_bitmap() be called. */
 inline void set_bitmap_reclaim(DOS_FS *fs, uint32_t cluster)
 {
-    set_bit(cluster, fs->reclaim_bitmap);
+    set_bit(cluster, fs->bitmap);
     alloc_clusters++;
 }
 
 inline void clear_bitmap_reclaim(DOS_FS *fs, uint32_t cluster)
 {
-    clear_bit(cluster, fs->reclaim_bitmap);
+    clear_bit(cluster, fs->bitmap);
     alloc_clusters--;
 }
 
 inline void set_bitmap_occupied(DOS_FS *fs, uint32_t cluster)
 {
+    set_bit(cluster, fs->bitmap);
     if (!test_bit(cluster, fs->real_bitmap)) {
         alloc_clusters++;
         set_bit(cluster, fs->real_bitmap);
-        set_bit(cluster, fs->bitmap);
     }
 }
 
 inline void clear_bitmap_occupied(DOS_FS *fs, uint32_t cluster)
 {
-#if 0
-    if (test_bit(cluster, fs->real_bitmap)) {
-        clear_bit(cluster, fs->real_bitmap);
-        clear_bit(cluster, fs->bitmap);
-        alloc_clusters--;
-    }
-#else
     clear_bit(cluster, fs->bitmap);
     if (test_bit(cluster, fs->real_bitmap)) {
         clear_bit(cluster, fs->real_bitmap);
         alloc_clusters--;
     }
-#endif
 }
 
 void fix_bad(DOS_FS *fs)
@@ -501,11 +491,8 @@ void fix_bad(DOS_FS *fs)
     if (verbose)
         printf("Checking for bad clusters.\n");
 
-    /* use reclaim_bitmap to check bad cluster in this function temporarily */
-    memcpy(fs->reclaim_bitmap, fs->real_bitmap, fs->bitmap_size);
-
     for (i = FAT_START_ENT; i < max_clus_num; i++) {
-        if (test_bit(i, fs->reclaim_bitmap)) {
+        if (test_bit(i, fs->real_bitmap)) {
             /* TODO: check 64bit at once */
             if (fs->real_bitmap[i / BITS_PER_LONG] == 0xffffffff) {
                 i = ((i / BITS_PER_LONG) * BITS_PER_LONG) + BITS_PER_LONG - 1;
@@ -522,8 +509,6 @@ void fix_bad(DOS_FS *fs)
             }
         }
     }
-
-    memset(fs->reclaim_bitmap, 0, fs->bitmap_size);
 }
 
 void reclaim_free(DOS_FS *fs)
@@ -697,7 +682,7 @@ void reclaim_file(DOS_FS *fs)
                             " on reclaim cluster chain.\n");
                 }
 
-                if (test_bit(walk, fs->reclaim_bitmap)) {
+                if (test_bit(walk, fs->bitmap)) {
                     set_fat(fs, prev, -1);
                     break;
                 }
