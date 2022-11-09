@@ -1,0 +1,31 @@
+#!/bin/sh /usr/share/dpatch/dpatch-run
+## 10-manpage-synopsis.dpatch by Daniel Baumann <daniel@debian.org>
+##
+## DP: List alternative binary names in manpage synopsis (Closes: #284983).
+
+@DPATCH@
+
+diff -Naurp dosfstools.orig/dosfsck/dosfsck.8 dosfstools/dosfsck/dosfsck.8
+--- dosfstools.orig/dosfsck/dosfsck.8	2008-06-27 06:39:58.000000000 +0200
++++ dosfstools/dosfsck/dosfsck.8	2008-06-27 06:43:04.000000000 +0200
+@@ -3,7 +3,7 @@
+ dosfsck \- check and repair MS-DOS file systems
+ .SH SYNOPSIS
+ .ad l
+-.B dosfsck
++.B dosfsck|fsck.msdos|fsck.vfat
+ .RB [ \-aAflnrtvVwy ]
+ .RB [ \-d\ \fIpath\fB\ \-d\ \fI...\fB ]
+ .RB [ \-u\ \fIpath\fB\ \-u\ \fI...\fB ]
+diff -Naurp dosfstools.orig/mkdosfs/mkdosfs.8 dosfstools/mkdosfs/mkdosfs.8
+--- dosfstools.orig/mkdosfs/mkdosfs.8	2008-06-27 06:40:00.000000000 +0200
++++ dosfstools/mkdosfs/mkdosfs.8	2008-06-27 06:43:14.000000000 +0200
+@@ -4,7 +4,7 @@
+ .B mkdosfs
+ \- create an MS-DOS file system under Linux
+ .SH SYNOPSIS
+-.B mkdosfs
++.B mkdosfs|mkfs.msdos|mkfs.vfat
+ [
+ .B \-A
+ ]

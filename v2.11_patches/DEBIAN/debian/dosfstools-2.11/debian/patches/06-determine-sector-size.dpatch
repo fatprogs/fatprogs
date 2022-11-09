@@ -1,0 +1,44 @@
+#!/bin/sh /usr/share/dpatch/dpatch-run
+## 06-determine-sector-size.dpatch by Petr Gajdos <pgajdos@suse.cz>
+##
+## DP: determine sector size of device automatically or if -S parameter present,
+## DP: verify, that it's not under physical sector size.
+
+@DPATCH@
+
+diff -Naurp dosfstools-2.11.orig/mkdosfs/mkdosfs.c dosfstools-2.11/mkdosfs/mkdosfs.c
+--- dosfstools-2.11.orig/mkdosfs/mkdosfs.c	2005-03-12 16:12:16.000000000 +0000
++++ dosfstools-2.11/mkdosfs/mkdosfs.c	2008-06-26 13:23:40.000000000 +0000
+@@ -1424,6 +1424,7 @@ main (int argc, char **argv)
+   int i = 0, pos, ch;
+   int create = 0;
+   unsigned long long cblocks;
++  int min_sector_size;
+   
+   if (argc && *argv) {		/* What's the program name? */
+     char *p;
+@@ -1712,6 +1713,24 @@ main (int argc, char **argv)
+ 	)
+       die ("Will not try to make filesystem on full-disk device '%s' (use -I if wanted)");
+ 
++  if (sector_size_set)
++    {
++      if (ioctl(dev, BLKSSZGET, &min_sector_size) >= 0)
++          if (sector_size < min_sector_size)
++            {
++	      sector_size = min_sector_size;
++              fprintf(stderr, "Warning: sector size was set to %d (minimal for this device)\n", sector_size);
++            }
++    }
++  else
++    {
++      if (ioctl(dev, BLKSSZGET, &min_sector_size) >= 0)
++        {
++	  sector_size = min_sector_size;
++	  sector_size_set = 1;
++        }
++    }
++
+   establish_params (statbuf.st_rdev,statbuf.st_size);	
+                                 /* Establish the media parameters */
+ 

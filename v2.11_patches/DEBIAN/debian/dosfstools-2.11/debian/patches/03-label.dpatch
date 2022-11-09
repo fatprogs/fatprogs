@@ -1,0 +1,307 @@
+#!/bin/sh /usr/share/dpatch/dpatch-run
+## 03-label.dpatch by Jeremy Katz <katzj@redhat.com>
+##
+## DP: add dosfslabel (originally by Peter Jones)
+
+@DPATCH@
+
+diff -Naurp dosfstools-2.11.orig/dosfsck/Makefile dosfstools-2.11/dosfsck/Makefile
+--- dosfstools-2.11.orig/dosfsck/Makefile	1999-07-06 14:23:11.000000000 +0000
++++ dosfstools-2.11/dosfsck/Makefile	2008-06-26 13:10:54.000000000 +0000
+@@ -1,9 +1,12 @@
+ 
+-OBJECTS = boot.o check.o common.o dosfsck.o fat.o file.o io.o lfn.o
++OBJECTS = boot.o check.o common.o fat.o file.o io.o lfn.o
+ 
+-all: dosfsck
++all: dosfsck dosfslabel
+ 
+-dosfsck: $(OBJECTS)
++dosfsck: $(OBJECTS) dosfsck.o
++	$(CC) -o $@ $(LDFLAGS) $^
++
++dosfslabel : $(OBJECTS) dosfslabel.o
+ 	$(CC) -o $@ $(LDFLAGS) $^
+ 
+ .c.o:
+@@ -13,6 +16,7 @@ install: dosfsck
+ 	mkdir -p $(SBINDIR) $(MANDIR)
+ 	install -m 755 dosfsck $(SBINDIR)
+ 	install -m 644 dosfsck.8 $(MANDIR)
++	install -m 755 dosfslabel $(SBINDIR)
+ 	rm -f $(SBINDIR)/fsck.msdos
+ 	rm -f $(SBINDIR)/fsck.vfat
+ 	ln -s dosfsck $(SBINDIR)/fsck.msdos
+@@ -25,7 +29,7 @@ clean:
+ 	rm -f *.o *.s *.i *~ \#*# tmp_make .#* .new*
+ 
+ distclean: clean
+-	rm -f *.a dosfsck
++	rm -f *.a dosfsck dosfslabel
+ 
+ dep:
+ 	sed '/\#\#\# Dependencies/q' <Makefile >tmp_make
+@@ -38,6 +42,7 @@ check.o: check.c common.h dosfsck.h io.h
+ common.o: common.c common.h
+ dosfsck.o: dosfsck.c common.h dosfsck.h io.h boot.h fat.h file.h \
+  check.h
++dosfslabel.o: dosfslabel.c common.h dosfsck.h io.h boot.h fat.h file.h check.h
+ fat.o: fat.c common.h dosfsck.h io.h check.h fat.h
+ file.o: file.c common.h file.h
+ io.o: io.c dosfsck.h common.h io.h
+diff -Naurp dosfstools-2.11.orig/dosfsck/boot.c dosfstools-2.11/dosfsck/boot.c
+--- dosfstools-2.11.orig/dosfsck/boot.c	2005-03-12 14:16:22.000000000 +0000
++++ dosfstools-2.11/dosfsck/boot.c	2008-06-26 13:10:10.000000000 +0000
+@@ -8,6 +8,7 @@
+ #include <stdio.h>
+ #include <string.h>
+ #include <sys/types.h>
++#include <stdlib.h>
+ 
+ #include "common.h"
+ #include "dosfsck.h"
+@@ -348,6 +349,21 @@ void read_boot(DOS_FS *fs)
+     /* On FAT32, the high 4 bits of a FAT entry are reserved */
+     fs->eff_fat_bits = (fs->fat_bits == 32) ? 28 : fs->fat_bits;
+     fs->fat_size = fat_length*logical_sector_size;
++
++    fs->label = calloc(12, sizeof (__u8));
++    if (fs->fat_bits == 12 || fs->fat_bits == 16) {
++        struct boot_sector_16 *b16 = (struct boot_sector_16 *)&b;
++        if (b16->extended_sig == 0x29)
++            memmove(fs->label, b16->label, 11);
++        else
++            fs->label = NULL;
++    } else if (fs->fat_bits == 32) {
++        if (b.extended_sig == 0x29)
++            memmove(fs->label, &b.label, 11);
++        else
++            fs->label = NULL;
++    }
++
+     if (fs->clusters > ((unsigned long long)fs->fat_size*8/fs->fat_bits)-2)
+ 	die("File system has %d clusters but only space for %d FAT entries.",
+ 	  fs->clusters,((unsigned long long)fs->fat_size*8/fs->fat_bits)-2);
+@@ -365,6 +381,36 @@ void read_boot(DOS_FS *fs)
+     if (verbose) dump_boot(fs,&b,logical_sector_size);
+ }
+ 
++void write_label(DOS_FS *fs, char *label)
++{
++    struct boot_sector b;
++    struct boot_sector_16 *b16 = (struct boot_sector_16 *)&b;
++    int l = strlen(label);
++
++    while (l < 11)
++        label[l++] = ' ';
++
++    fs_read(0, sizeof(b), &b);
++    if (fs->fat_bits == 12 || fs->fat_bits == 16) {
++        if (b16->extended_sig != 0x29) {
++            b16->extended_sig = 0x29;
++            b16->serial = 0;
++            memmove(b16->fs_type, fs->fat_bits == 12 ?"FAT12   ":"FAT16   ", 8);
++        }
++        memmove(b16->label, label, 11);
++    } else if (fs->fat_bits == 32) {
++        if (b.extended_sig != 0x29) {
++            b.extended_sig = 0x29;
++            b.serial = 0;
++            memmove(b.fs_type, "FAT32   ", 8);
++        }
++        memmove(b.label, label, 11);
++    }
++    fs_write(0, sizeof(b), &b);
++    if (fs->fat_bits == 32 && fs->backupboot_start)
++        fs_write(fs->backupboot_start, sizeof(b), &b);
++}
++
+ /* Local Variables: */
+ /* tab-width: 8     */
+ /* End:             */
+diff -Naurp dosfstools-2.11.orig/dosfsck/boot.h dosfstools-2.11/dosfsck/boot.h
+--- dosfstools-2.11.orig/dosfsck/boot.h	1997-06-18 10:09:38.000000000 +0000
++++ dosfstools-2.11/dosfsck/boot.h	2008-06-26 13:10:10.000000000 +0000
+@@ -7,6 +7,7 @@
+ #define _BOOT_H
+ 
+ void read_boot(DOS_FS *fs);
++void write_label(DOS_FS *fs, char *label);
+ 
+ /* Reads the boot sector from the currently open device and initializes *FS */
+ 
+diff -Naurp dosfstools-2.11.orig/dosfsck/dosfsck.h dosfstools-2.11/dosfsck/dosfsck.h
+--- dosfstools-2.11.orig/dosfsck/dosfsck.h	2005-03-12 14:23:12.000000000 +0000
++++ dosfstools-2.11/dosfsck/dosfsck.h	2008-06-26 13:10:10.000000000 +0000
+@@ -70,10 +70,47 @@ struct boot_sector {
+     __u32	root_cluster;	/* first cluster in root directory */
+     __u16	info_sector;	/* filesystem info sector */
+     __u16	backup_boot;	/* backup boot sector */
+-    __u16	reserved2[6];	/* Unused */
++    __u8 	reserved2[12];	/* Unused */
++
++    __u8        drive_number;   /* Logical Drive Number */
++    __u8        reserved3;      /* Unused */
++
++    __u8        extended_sig;   /* Extended Signature (0x29) */
++    __u32       serial;         /* Serial number */
++    __u8        label[11];      /* FS label */
++    __u8        fs_type[8];     /* FS Type */
++
++    /* fill up to 512 bytes */
++    __u8	junk[422];
++} __attribute__ ((packed));
++
++struct boot_sector_16 {
++    __u8	ignored[3];	/* Boot strap short or near jump */
++    __u8	system_id[8];	/* Name - can be used to special case
++				   partition manager volumes */
++    __u8	sector_size[2];	/* bytes per logical sector */
++    __u8	cluster_size;	/* sectors/cluster */
++    __u16	reserved;	/* reserved sectors */
++    __u8	fats;		/* number of FATs */
++    __u8	dir_entries[2];	/* root directory entries */
++    __u8	sectors[2];	/* number of sectors */
++    __u8	media;		/* media code (unused) */
++    __u16	fat_length;	/* sectors/FAT */
++    __u16	secs_track;	/* sectors per track */
++    __u16	heads;		/* number of heads */
++    __u32	hidden;		/* hidden sectors (unused) */
++    __u32	total_sect;	/* number of sectors (if sectors == 0) */
++
++    __u8        drive_number;   /* Logical Drive Number */
++    __u8        reserved2;      /* Unused */
++
++    __u8        extended_sig;   /* Extended Signature (0x29) */
++    __u32       serial;         /* Serial number */
++    __u8        label[11];      /* FS label */
++    __u8        fs_type[8];     /* FS Type */
+ 
+     /* fill up to 512 bytes */
+-    __u8	junk[448];
++    __u8	junk[450];
+ } __attribute__ ((packed));
+ 
+ struct info_sector {
+@@ -133,6 +170,7 @@ typedef struct {
+     long free_clusters;
+     loff_t backupboot_start; /* 0 if not present */
+     FAT_ENTRY *fat;
++    char *label;
+ } DOS_FS;
+ 
+ #ifndef offsetof
+diff -Naurp dosfstools-2.11.orig/dosfsck/dosfslabel.c dosfstools-2.11/dosfsck/dosfslabel.c
+--- dosfstools-2.11.orig/dosfsck/dosfslabel.c	1970-01-01 00:00:00.000000000 +0000
++++ dosfstools-2.11/dosfsck/dosfslabel.c	2008-06-26 13:10:10.000000000 +0000
+@@ -0,0 +1,110 @@
++/* dosfslabel.c  -  User interface */
++
++/* Copyright 2007 Red Hat, Inc.
++ * Portions copyright 1998 Roman Hodek.
++ * Portions copyright 1993 Werner Almesberger.
++ */
++
++#include "../version.h"
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdlib.h>
++#include <unistd.h>
++#include <getopt.h>
++
++#include "common.h"
++#include "dosfsck.h"
++#include "io.h"
++#include "boot.h"
++#include "fat.h"
++#include "file.h"
++#include "check.h"
++
++
++int interactive = 0,list = 0,test = 0,verbose = 0,write_immed = 0;
++int atari_format = 0;
++unsigned n_files = 0;
++void *mem_queue = NULL;
++
++
++static void usage(int error)
++{
++    FILE *f = error ? stderr : stdout;
++    int status = error ? 1 : 0;
++
++    fprintf(f,"usage: dosfslabel device [label]\n");
++    exit(status);
++}
++
++/*
++ * ++roman: On m68k, check if this is an Atari; if yes, turn on Atari variant
++ * of MS-DOS filesystem by default.
++ */
++static void check_atari( void )
++{
++#ifdef __mc68000__
++    FILE *f;
++    char line[128], *p;
++
++    if (!(f = fopen( "/proc/hardware", "r" ))) {
++	perror( "/proc/hardware" );
++	return;
++    }
++
++    while( fgets( line, sizeof(line), f ) ) {
++	if (strncmp( line, "Model:", 6 ) == 0) {
++	    p = line + 6;
++	    p += strspn( p, " \t" );
++	    if (strncmp( p, "Atari ", 6 ) == 0)
++		atari_format = 1;
++	    break;
++	}
++    }
++    fclose( f );
++#endif
++}
++
++
++int main(int argc, char *argv[])
++{
++    DOS_FS fs;
++    int rw = 0;
++
++    char *device = NULL;
++    char *label = NULL;
++
++    check_atari();
++
++    if (argc < 2 || argc > 3)
++        usage(1);
++
++    if (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help"))
++        usage(0);
++    else if (!strcmp(argv[1], "-V") || !strcmp(argv[1], "--version")) {
++        printf( "dosfslabel " VERSION ", " VERSION_DATE ", FAT32, LFN\n" );
++        exit(0);
++    }
++
++    device = argv[1];
++    if (argc == 3) {
++        label = argv[2];
++        if (strlen(label) > 11) {
++            fprintf(stderr,
++                    "dosfslabel: labels can be no longer than 11 characters\n");
++            exit(1);
++        }
++        rw = 1;
++    }
++
++    fs_open(device, rw);
++    read_boot(&fs);
++    if (!rw) {
++        fprintf(stdout, "%s\n", fs.label);
++        exit(0);
++    }
++
++    write_label(&fs, label);
++    return fs_close(rw) ? 1 : 0;
++}

@@ -1,0 +1,54 @@
+Fix out of bound write issues where sprintf writes across both
+name and ext fields and drops the final null ternimator outside the struct
+
+Upstream-Status: Inappropriate [licensing]
+We're tracking an old release of dosfstools due to licensing issues.
+
+diff --git a/dosfsck/check.c b/dosfsck/check.c
+index e8c13bb..91177d3 100644
+--- a/dosfsck/check.c
++++ b/dosfsck/check.c
+@@ -58,6 +58,13 @@ static DOS_FILE *root;
+     }									\
+   } while(0)
+ 
++static void de_printf(DIR_ENT *de, const char *pattern, int curr_num)
++{
++    char buffer[12];
++    sprintf(buffer, pattern, curr_num);
++    memcpy(de->name, buffer, 8);
++    memcpy(de->ext, buffer + 8, 3);
++}
+ 
+ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
+ {
+@@ -110,7 +117,8 @@ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
+ 	}
+ 	memset(de,0,sizeof(DIR_ENT));
+ 	while (1) {
+-	    sprintf(de->name,pattern,curr_num);
++	    de_printf(de, pattern, curr_num);
++
+ 	    clu_num = fs->root_cluster;
+ 	    i = 0;
+ 	    offset2 = cluster_start(fs,clu_num);
+@@ -150,7 +158,7 @@ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
+ 	offset = fs->root_start+next_free*sizeof(DIR_ENT);
+ 	memset(de,0,sizeof(DIR_ENT));
+ 	while (1) {
+-	    sprintf(de->name,pattern,curr_num);
++	    de_printf(de, pattern, curr_num);
+ 	    for (scan = 0; scan < fs->root_entries; scan++)
+ 		if (scan != next_free &&
+ 		    !strncmp(root[scan].name,de->name,MSDOS_NAME))
+@@ -311,8 +319,8 @@ static void auto_rename(DOS_FILE *file)
+     first = file->parent ? file->parent->first : root;
+     number = 0;
+     while (1) {
+-	sprintf(file->dir_ent.name,"FSCK%04d",number);
+-	strncpy(file->dir_ent.ext,"REN",3);
++	de_printf(&file->dir_ent, "FSCK%04dREN", number);
++
+ 	for (walk = first; walk; walk = walk->next)
+ 	    if (walk != file && !strncmp(walk->dir_ent.name,file->dir_ent.
+ 	      name,MSDOS_NAME)) break;

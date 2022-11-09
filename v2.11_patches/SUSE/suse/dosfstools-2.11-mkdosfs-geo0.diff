@@ -1,0 +1,35 @@
+the HDIO_GETGEO ioctl works on device mapper devices but returns
+zero heads and sectors. Therefore let's a) assume dummy values in
+that case in mkdosfs and b) don't consider such fat file systems as
+invalid in dosfsck. The Linux kernel accepts them anyways.
+Index: dosfstools-2.11/mkdosfs/mkdosfs.c
+===================================================================
+--- dosfstools-2.11.orig/mkdosfs/mkdosfs.c
++++ dosfstools-2.11/mkdosfs/mkdosfs.c
+@@ -751,8 +751,8 @@ establish_params (int device_num,int siz
+     {
+       /* Can we get the drive geometry? (Note I'm not too sure about */
+       /* whether to use HDIO_GETGEO or HDIO_REQ) */
+-      if (ioctl (dev, HDIO_GETGEO, &geometry)) {
+-	printf ("unable to get drive geometry, using default 255/63");
++      if (ioctl (dev, HDIO_GETGEO, &geometry) || geometry.sectors == 0 || geometry.heads == 0) {
++	printf ("unable to get drive geometry, using default 255/63\n");
+         bs.secs_track = CT_LE_W(63);
+         bs.heads = CT_LE_W(255);
+       }
+Index: dosfstools-2.11/dosfsck/boot.c
+===================================================================
+--- dosfstools-2.11.orig/dosfsck/boot.c
++++ dosfstools-2.11/dosfsck/boot.c
+@@ -353,9 +353,11 @@ void read_boot(DOS_FS *fs)
+     if (logical_sector_size & (SECTOR_SIZE-1))
+ 	die("Logical sector size (%d bytes) is not a multiple of the physical "
+ 	  "sector size.",logical_sector_size);
++#if 0 /* linux kernel doesn't check that either */
+     /* ++roman: On Atari, these two fields are often left uninitialized */
+     if (!atari_format && (!b.secs_track || !b.heads))
+ 	die("Invalid disk format in boot sector.");
++#endif
+     if (verbose) dump_boot(fs,&b,logical_sector_size);
+ }
+ 

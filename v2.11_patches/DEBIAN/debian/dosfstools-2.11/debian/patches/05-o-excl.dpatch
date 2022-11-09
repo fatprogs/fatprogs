@@ -1,0 +1,28 @@
+#!/bin/sh /usr/share/dpatch/dpatch-run
+## 05-o-excl.dpatch by Pavol Rusnak <prusnak@suse.cz>
+##
+## DP: mkdosfs now opens device with O_EXCL.
+
+@DPATCH@
+
+diff -Naurp dosfstools-2.11.orig/mkdosfs/mkdosfs.c dosfstools-2.11/mkdosfs/mkdosfs.c
+--- dosfstools-2.11.orig/mkdosfs/mkdosfs.c	2005-03-12 16:12:16.000000000 +0000
++++ dosfstools-2.11/mkdosfs/mkdosfs.c	2008-06-26 13:20:35.000000000 +0000
+@@ -1669,7 +1669,7 @@ main (int argc, char **argv)
+ 
+   if (!create) {
+     check_mount (device_name);	/* Is the device already mounted? */
+-    dev = open (device_name, O_RDWR);	/* Is it a suitable device to build the FS on? */
++    dev = open (device_name, O_EXCL|O_RDWR);	/* Is it a suitable device to build the FS on? */
+     if (dev < 0)
+       die ("unable to open %s");
+   }
+@@ -1677,7 +1677,7 @@ main (int argc, char **argv)
+       off_t offset = blocks*BLOCK_SIZE - 1;
+       char null = 0;
+       /* create the file */
+-      dev = open( device_name, O_RDWR|O_CREAT|O_TRUNC, 0666 );
++      dev = open( device_name, O_EXCL|O_RDWR|O_CREAT|O_TRUNC, 0666 );
+       if (dev < 0)
+ 	die("unable to create %s");
+       /* seek to the intended end-1, and write one byte. this creates a

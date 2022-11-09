@@ -1,0 +1,10 @@
+--- mkdosfs/mkdosfs.c
++++ mkdosfs/mkdosfs.c
+@@ -51,6 +51,6 @@
+ 
+ #include <fcntl.h>
+ #include <linux/hdreg.h>
+-#include <linux/fs.h>
++#include <sys/mount.h>
+ #include <linux/fd.h>
+ #include <endian.h>

@@ -1,0 +1,20 @@
+Source: dosfstools
+Section: otherosfs
+Priority: optional
+Maintainer: Daniel Baumann <daniel@debian.org>
+Build-Depends: debhelper (>= 7), dpatch
+Standards-Version: 3.8.0
+Homepage: http://ftp.uni-erlangen.de/pub/Linux/LOCAL/dosfstools/
+Vcs-Browser: http://git.debian.net/?p=dosfstools.git
+Vcs-Git: git://git.debian.net/git/dosfstools.git
+
+Package: dosfstools
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: utilities for making and checking MS-DOS FAT filesystems
+ The dosfstools package includes the mkdosfs (aka mkfs.dos and mkfs.vfat) and
+ dosfsck (aka fsck.msdos and fsck.vfat) utilities, which respectively make and
+ check MS-DOS FAT filesystems on hard drives or on floppies.
+ .
+ This version uses the enhanced boot sector/superblock format of DOS 3.3+ as
+ well as provides a default dummy boot sector code.

@@ -1,0 +1,16 @@
+2009-11-04  Stepan Kasal  <skasal@redhat.com>
+
+	* mkdosfs/mkdosfs.c (establish_params): If the reported HD geometry
+	  contains 0, default to 255/63 as well.
+
+--- dosfstools-2.11/mkdosfs/mkdosfs.c.geom0	2009-11-04 19:03:30.737106000 +0100
++++ dosfstools-2.11/mkdosfs/mkdosfs.c	2009-11-04 19:06:39.238353000 +0100
+@@ -746,7 +746,7 @@
+     {
+       /* Can we get the drive geometry? (Note I'm not too sure about */
+       /* whether to use HDIO_GETGEO or HDIO_REQ) */
+-      if (ioctl (dev, HDIO_GETGEO, &geometry)) {
++      if (ioctl (dev, HDIO_GETGEO, &geometry) || geometry.sectors == 0 || geometry.heads == 0) {
+ 	printf ("unable to get drive geometry, using default 255/63");
+         bs.secs_track = CT_LE_W(63);
+         bs.heads = CT_LE_W(255);

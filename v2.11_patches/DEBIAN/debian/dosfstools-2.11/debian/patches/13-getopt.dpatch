@@ -1,0 +1,19 @@
+#!/bin/sh /usr/share/dpatch/dpatch-run
+## 13-getopt.dpatch by Adonikam Virgo <adonikam@virgonet.org>
+##
+## DP: Fixes backup sector getopt (Closes: #232387, #479794).
+
+@DPATCH@
+
+diff -Naurp dosfstools.orig/mkdosfs/mkdosfs.c dosfstools/mkdosfs/mkdosfs.c
+--- dosfstools.orig/mkdosfs/mkdosfs.c	2008-06-27 06:19:19.000000000 +0000
++++ dosfstools/mkdosfs/mkdosfs.c	2008-06-27 06:31:46.000000000 +0000
+@@ -1440,7 +1440,7 @@ main (int argc, char **argv)
+   printf ("%s " VERSION " (" VERSION_DATE ")\n",
+ 	   program_name);
+ 
+-  while ((c = getopt (argc, argv, "AbcCf:F:Ii:l:m:n:r:R:s:S:h:v")) != EOF)
++  while ((c = getopt (argc, argv, "Ab:cCf:F:Ii:l:m:n:r:R:s:S:h:v")) != EOF)
+     /* Scan the command line for options */
+     switch (c)
+       {

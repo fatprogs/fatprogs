@@ -1,0 +1,21 @@
+#!/bin/sh /usr/share/dpatch/dpatch-run
+## 09-manpage-fat32.dpatch by Daniel Baumann <daniel@debian.org>
+##
+## DP: Don't claim that FAT32 is not choosed automatically (Closes: #414183).
+
+@DPATCH@
+
+diff -Naurp dosfstools.orig/mkdosfs/mkdosfs.8 dosfstools/mkdosfs/mkdosfs.8
+--- dosfstools.orig/mkdosfs/mkdosfs.8	2008-06-27 06:34:10.000000000 +0200
++++ dosfstools/mkdosfs/mkdosfs.8	2008-06-27 06:35:30.000000000 +0200
+@@ -126,9 +126,7 @@ more than 2 FATs.
+ .BI \-F " FAT-size"
+ Specifies the type of file allocation tables used (12, 16 or 32 bit).
+ If nothing is specified, \fBmkdosfs\fR will automatically select
+-between 12 and 16 bit, whatever fits better for the file system size.
+-32 bit FAT (FAT32 format) must (still) be selected explicitly if you
+-want it.
++between 12, 16 and 32 bit, whatever fits better for the file system size.
+ .TP
+ .BI \-h " number-of-hidden-sectors "
+ Select the number of hidden sectors in the volume. Apparently some

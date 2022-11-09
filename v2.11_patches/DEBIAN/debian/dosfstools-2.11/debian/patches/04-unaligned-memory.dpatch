@@ -1,0 +1,21 @@
+#!/bin/sh /usr/share/dpatch/dpatch-run
+## 04-unaligned-memory.dpatch by Khalid Aziz <khalid_aziz@hp.com>
+##
+## DP: Fix unaligned memory accesses which cause warnings to appear everytime
+## DP: the elilo bootloader script runs. This has led a number of users to
+## DP: believe their install has failed (Closes: #258839).
+
+@DPATCH@
+
+diff -Naurp dosfstools-2.11.orig/dosfsck/boot.c dosfstools-2.11/dosfsck/boot.c
+--- dosfstools-2.11.orig/dosfsck/boot.c	2008-06-26 13:28:26.000000000 +0000
++++ dosfstools-2.11/dosfsck/boot.c	2008-06-26 13:28:06.000000000 +0000
+@@ -41,7 +41,7 @@ static struct {
+     ({						\
+ 	unsigned short __v;			\
+ 	memcpy( &__v, &f, sizeof(__v) );	\
+-	CF_LE_W( *(unsigned short *)&f );	\
++	CF_LE_W( *(unsigned short *)&__v );	\
+     })
+ #else
+ #define GET_UNALIGNED_W(f) CF_LE_W( *(unsigned short *)&f )

@@ -1,0 +1,21 @@
+#!/bin/sh /usr/share/dpatch/dpatch-run
+## 15-manpage-files.dpatch by Daniel Baumann <daniel@debian.org>
+##
+## DP: Lists fsckNNNN.rec files in FILES section (Closes: #444596).
+
+@DPATCH@
+
+diff -Naurp dosfstools.orig/dosfsck/dosfsck.8 dosfstools/dosfsck/dosfsck.8
+--- dosfstools.orig/dosfsck/dosfsck.8	2008-06-27 06:55:50.000000000 +0000
++++ dosfstools/dosfsck/dosfsck.8	2008-06-27 07:01:17.000000000 +0000
+@@ -131,6 +131,10 @@ Recoverable errors have been detected or
+ internal inconsistency.
+ .IP 2
+ Usage error. \fBdosfsck\fP did not access the file system.
++.SH FILES
++.IP "fsck0000.rec, fsck0001.rec, ..."
++When recovering from a corrupted file system, dosfsck dumps recovered data
++into files named 'fsckNNNN.rec' in the top level directory of the file system.
+ .SH BUGS
+ Does not create . and .. files where necessary. Does not remove entirely
+ empty directories. Should give more diagnostic messages. Undeleting files

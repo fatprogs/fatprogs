@@ -1,0 +1,13 @@
+diff -puNr dosfstools-2.11.orig/dosfsck/boot.c dosfstools-2.11/dosfsck/boot.c
+--- dosfstools-2.11.orig/dosfsck/boot.c	2010-07-16 16:58:32.000000000 -0700
++++ dosfstools-2.11/dosfsck/boot.c	2010-07-16 16:59:14.000000000 -0700
+@@ -359,9 +359,6 @@ void read_boot(DOS_FS *fs)
+     if (logical_sector_size & (SECTOR_SIZE-1))
+ 	die("Logical sector size (%d bytes) is not a multiple of the physical "
+ 	  "sector size.",logical_sector_size);
+-    /* ++roman: On Atari, these two fields are often left uninitialized */
+-    if (!atari_format && (!b.secs_track || !b.heads))
+-	die("Invalid disk format in boot sector.");
+     if (verbose) dump_boot(fs,&b,logical_sector_size);
+ }
+ 

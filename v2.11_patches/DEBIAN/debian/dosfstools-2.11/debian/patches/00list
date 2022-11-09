@@ -1,0 +1,16 @@
+01-argfix.dpatch
+02-fortify.dpatch
+03-label.dpatch
+04-unaligned-memory.dpatch
+05-o-excl.dpatch
+06-determine-sector-size.dpatch
+07-manpage-spelling.dpatch
+08-manpage-drop.dpatch
+09-manpage-fat32.dpatch
+10-manpage-synopsis.dpatch
+11-memory-efficiency.dpatch
+12-zero-slot.dpatch
+13-getopt.dpatch
+14-bootcode.dpatch
+15-manpage-files.dpatch
+99-conglomeration.dpatch

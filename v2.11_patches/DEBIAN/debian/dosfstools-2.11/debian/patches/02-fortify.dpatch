@@ -1,0 +1,22 @@
+#!/bin/sh /usr/share/dpatch/dpatch-run
+## 02-fortify.dpatch by Jakub Jelinek <jakub@redhat.com>
+##
+## DP: make it build with -D_FORTIFY_SOURCE=2
+## DP: This violates -D_FORTIFY_SOURCE=2 (which is stricter than C standard),
+## DP: but isn't actually any buffer overflow.
+## DP: But using memcpy is more efficient anyway.
+
+@DPATCH@
+
+diff -Naurp dosfstools-2.11.orig/mkdosfs/mkdosfs.c dosfstools-2.11/mkdosfs/mkdosfs.c
+--- dosfstools-2.11.orig/mkdosfs/mkdosfs.c	2005-03-12 16:12:16.000000000 +0000
++++ dosfstools-2.11/mkdosfs/mkdosfs.c	2008-06-26 12:46:46.000000000 +0000
+@@ -805,7 +805,7 @@ setup_tables (void)
+       /* On Atari, the first few bytes of the boot sector are assigned
+        * differently: The jump code is only 2 bytes (and m68k machine code
+        * :-), then 6 bytes filler (ignored), then 3 byte serial number. */
+-    strncpy( bs.system_id-1, "mkdosf", 6 );
++    memcpy( bs.system_id-1, "mkdosf", 6 );
+   else
+     strcpy (bs.system_id, "mkdosfs");
+   if (sectors_per_cluster)

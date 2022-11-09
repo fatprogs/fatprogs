@@ -1,0 +1,1963 @@
+--- a/dosfstools-2.11/dosfsck/boot.c
++++ b/dosfstools-2.11maemo8/src/boot.c
+@@ -9,9 +9,11 @@
+ #include <string.h>
+ #include <sys/types.h>
+ #include <stdlib.h>
++#include <time.h>
+ 
+ #include "common.h"
+ #include "dosfsck.h"
++#include "fat.h"
+ #include "io.h"
+ #include "boot.h"
+ 
+@@ -35,7 +37,7 @@ static struct {
+     { 0xff, "5.25\" 320k floppy 2s/40tr/8sec" },
+ };
+ 
+-#if defined __alpha || defined __ia64__ || defined __s390x__ || defined __x86_64__ || defined __ppc64__
++#if defined __alpha || defined __ia64__ || defined __s390x__ || defined __x86_64__ || defined __ppc64__ || __arm__
+ /* Unaligned fields must first be copied byte-wise */
+ #define GET_UNALIGNED_W(f)			\
+     ({						\
+@@ -114,7 +116,7 @@ static void dump_boot(DOS_FS *fs,struct boot_sector *b,unsigned lss)
+     printf("%10u sectors total\n", sectors ? sectors : CF_LE_L(b->total_sect));
+ }
+ 
+-static void check_backup_boot(DOS_FS *fs, struct boot_sector *b, int lss)
++static void check_backup_boot(DOS_FS *fs, struct boot_sector *b, int lss, int skip_trivial_errors)
+ {
+     struct boot_sector b2;
+ 
+@@ -172,20 +174,9 @@ static void check_backup_boot(DOS_FS *fs, struct boot_sector *b, int lss)
+ 	}
+ 	printf( "\n" );
+ 
+-	if (interactive)
+-	    printf( "1) Copy original to backup\n"
+-		    "2) Copy backup to original\n"
+-		    "3) No action\n" );
+-	else printf( "  Not automatically fixing this.\n" );
+-	switch (interactive ? get_key("123","?") : '3') {
+-	  case '1':
+-	    fs_write(fs->backupboot_start,sizeof(*b),b);
+-	    break;
+-	  case '2':
++	if ( !skip_trivial_errors ) {
++		printf("Copying backup to original\n");
+ 		fs_write(0,sizeof(b2),&b2);
+-	    break;
+-	  default:
+-	    break;
+ 	}
+     }
+ }
+@@ -267,7 +258,7 @@ static void read_fsinfo(DOS_FS *fs, struct boot_sector *b,int lss)
+ 	fs->free_clusters = CF_LE_L(i.free_clusters);
+ }
+ 
+-void read_boot(DOS_FS *fs)
++void read_boot(DOS_FS *fs, int skip_trivial_errors)
+ {
+     struct boot_sector b;
+     unsigned total_sectors;
+@@ -321,7 +312,7 @@ void read_boot(DOS_FS *fs)
+ 		    "  area is defined. Cannot fix this easily.\n" );
+ 
+ 	fs->backupboot_start = CF_LE_W(b.backup_boot)*logical_sector_size;
+-	check_backup_boot(fs,&b,logical_sector_size);
++	check_backup_boot(fs,&b,logical_sector_size,skip_trivial_errors);
+ 
+ 	read_fsinfo(fs,&b,logical_sector_size);
+     }
+@@ -375,16 +366,37 @@ void read_boot(DOS_FS *fs)
+     if (logical_sector_size & (SECTOR_SIZE-1))
+ 	die("Logical sector size (%d bytes) is not a multiple of the physical "
+ 	  "sector size.",logical_sector_size);
++#if 0 /* linux kernel doesn't check that either */
+     /* ++roman: On Atari, these two fields are often left uninitialized */
+     if (!atari_format && (!b.secs_track || !b.heads))
+ 	die("Invalid disk format in boot sector.");
++#endif
+     if (verbose) dump_boot(fs,&b,logical_sector_size);
+ }
+ 
++static loff_t find_volume_entry(DOS_FS *fs, DIR_ENT *de, loff_t pos, int sz)
++{
++	int i;
++
++	for (i = 0; i * sizeof(DIR_ENT) < sz; i++) {
++		fs_read(pos, sizeof(DIR_ENT), de);
++		if (de->attr & ATTR_VOLUME)
++			return pos;
++		pos += sizeof(DIR_ENT);
++	}
++
++	return 0;
++}
++
+ void write_label(DOS_FS *fs, char *label)
+ {
+     struct boot_sector b;
+     struct boot_sector_16 *b16 = (struct boot_sector_16 *)&b;
++	unsigned long clu_num;
++	DIR_ENT de;
++	loff_t pos;
++	time_t now;
++	struct tm *ctime;
+     int l = strlen(label);
+ 
+     while (l < 11)
+@@ -409,6 +421,32 @@ void write_label(DOS_FS *fs, char *label)
+     fs_write(0, sizeof(b), &b);
+     if (fs->fat_bits == 32 && fs->backupboot_start)
+         fs_write(fs->backupboot_start, sizeof(b), &b);
++
++	/* write label to dir entry */
++	if (fs->root_cluster) {
++		clu_num = fs->root_cluster;
++		while (clu_num > 0 && clu_num != -1) {
++			pos = find_volume_entry(fs, &de, cluster_start(fs, clu_num), fs->cluster_size);
++			if (pos > 0)
++				break;
++			clu_num = next_cluster(fs, clu_num);
++		}
++	} else {
++		pos = find_volume_entry(fs, &de, fs->root_start, fs->root_entries * sizeof(DIR_ENT));
++	}
++
++	if (pos == 0)
++		return;
++
++	memcpy(de.name, label, 11);
++	now = time(NULL);
++	ctime = localtime(&now);
++	de.time = CT_LE_W((unsigned short)((ctime->tm_sec >> 1) +
++			  (ctime->tm_min << 5) + (ctime->tm_hour << 11)));
++	de.date = CT_LE_W((unsigned short)(ctime->tm_mday +
++					  ((ctime->tm_mon+1) << 5) +
++					  ((ctime->tm_year-80) << 9)));
++	fs_write(pos, sizeof(DIR_ENT), &de);
+ }
+ 
+ /* Local Variables: */
+--- a/dosfstools-2.11/dosfsck/boot.h
++++ b/dosfstools-2.11maemo8/src/boot.h
+@@ -6,7 +6,7 @@
+ #ifndef _BOOT_H
+ #define _BOOT_H
+ 
+-void read_boot(DOS_FS *fs);
++void read_boot(DOS_FS *fs, int skip_trivial_errors);
+ void write_label(DOS_FS *fs, char *label);
+ 
+ /* Reads the boot sector from the currently open device and initializes *FS */
+--- a/dosfstools-2.11/dosfsck/check.c
++++ b/dosfstools-2.11maemo8/src/check.c
+@@ -305,14 +305,13 @@ static void truncate_file(DOS_FS *fs,DOS_FILE *file,unsigned long clusters)
+ static void auto_rename(DOS_FILE *file)
+ {
+     DOS_FILE *first,*walk;
+-    unsigned long int number;
++    static unsigned long int number = 0;
+ 
+     if (!file->offset) return;	/* cannot rename FAT32 root dir */
+     first = file->parent ? file->parent->first : root;
+-    number = 0;
+     while (1) {
+-	sprintf(file->dir_ent.name, "FSCK%04d", number / 1000);
+-	sprintf(file->dir_ent.name, "%03d", number % 1000);
++	sprintf(file->dir_ent.name, "FSCK%04ld", number / 1000);
++	sprintf(file->dir_ent.ext, "%03ld", number % 1000);
+ 	for (walk = first; walk; walk = walk->next)
+ 	    if (walk != file && !strncmp(walk->dir_ent.name,file->dir_ent.
+ 	      name,MSDOS_NAME)) break;
+@@ -526,7 +525,7 @@ static int check_file(DOS_FS *fs,DOS_FILE *file)
+     if (!(file->dir_ent.attr & ATTR_DIR) && CF_LE_L(file->dir_ent.size) >
+       (unsigned long long)clusters*fs->cluster_size) {
+ 	printf("%s\n  File size is %u bytes, cluster chain length is %llu bytes."
+-	  "\n  Truncating file to %lu bytes.\n",path_name(file),CF_LE_L(file->
++	  "\n  Truncating file to %llu bytes.\n",path_name(file),CF_LE_L(file->
+ 	  dir_ent.size),(unsigned long long)clusters*fs->cluster_size,(unsigned long long)clusters*fs->cluster_size);
+ 	MODIFY(file,size,CT_LE_L((unsigned long long)clusters*fs->cluster_size));
+     }
+--- a/dosfstools-2.11/dosfsck/common.c
++++ b/dosfstools-2.11maemo8/src/common.c
+@@ -5,6 +5,10 @@
+ /* FAT32, VFAT, Atari format support, and various fixes additions May 1998
+  * by Roman Hodek <Roman.Hodek@informatik.uni-erlangen.de> */
+ 
++/* A simple block allocator to speed up and cut down the huge memory
++ * overhead of dosfsck allocs (with full 8GB file system, cuts 120MB
++ * memory usage to 80MB) 2008-02-13 by Eero Tamminen
++ * <eero.tamminen@nokia.com> */
+ 
+ #include <stdlib.h>
+ #include <stdio.h>
+@@ -12,6 +16,10 @@
+ #include <stdarg.h>
+ #include <errno.h>
+ 
++#include <signal.h>
++#include <unistd.h>
++#include "io.h"
++
+ #include "common.h"
+ 
+ 
+@@ -20,6 +28,13 @@ typedef struct _link {
+     struct _link *next;
+ } LINK;
+ 
++/* pointers to current larger allocation block used for small allocations */
++static void *block_head = NULL;
++static void *block_end  = NULL;
++
++#define BLOCK_ALLOC_SIZE (4096-8)  /* assume this is one page with libc overhead */
++#define MIN_ALLOC_FROM_BLOCK  127  /* use block alloc for anything smaller */
++
+ 
+ void die(char *msg,...)
+ {
+@@ -45,25 +60,66 @@ void pdie(char *msg,...)
+ }
+ 
+ 
+-void *alloc(int size)
++void *alloc(size_t size)
+ {
+     void *this;
+ 
+     if ((this = malloc(size))) return this;
++    if (errno == 0) {
++	errno = ENOMEM;
++    }
+     pdie("malloc");
+     return NULL; /* for GCC */
+ }
+ 
+ 
+-void *qalloc(void **root,int size)
++/* should be called only from qalloc().
++ * get small allocs from a larger block and add those larger
++ * blocks to linked list of qalloc()
++ */
++static void *qalloc_block(void **root, size_t size)
++{
++    void *ret;
++    if (size > MIN_ALLOC_FROM_BLOCK) {
++	 return NULL;
++    }
++    /* dosfsck doesn't use doubles, so it's safe to align just to 4 */
++    size = (size+3) & ~3;
++    if (!block_head || block_head + size > block_end) {
++        LINK *link = alloc(sizeof(LINK));
++        link->next = *root;
++        *root = link;
++
++        block_head = alloc(BLOCK_ALLOC_SIZE);
++        block_end = block_head + BLOCK_ALLOC_SIZE;
++        link->data = block_head;
++    }
++    ret = block_head;
++    block_head += size;
++    return ret;
++}
++
++static void qfree_blocks(void)
++{
++    block_head = block_end = NULL;
++}
++
++
++void *qalloc(void **root, size_t size)
+ {
+     LINK *link;
++    void *block;
+ 
++    block = qalloc_block(root, size);
++    if (block) {
++        return block;
++    } else {
+         link = alloc(sizeof(LINK));
+         link->next = *root;
+         *root = link;
+         return link->data = alloc(size);
+     }   
++}
+ 
+ 
+ void qfree(void **root)
+@@ -76,6 +132,7 @@ void qfree(void **root)
+ 	free(this->data);
+ 	free(this);
+     }
++    qfree_blocks();
+ }
+ 
+ 
+@@ -102,6 +159,31 @@ char get_key(char *valid,char *prompt)
+     }
+ }
+ 
++
++static void time_limit_handler(int signo)
++{
++    const int errors = fs_close(0);
++
++    printf("dosfsck: check time limit reached, file system errors are %sdetected\n", errors ? "" : "not ");
++    exit(errors ? 1 : 0);
++} /* time_limit_handler */
++
++int set_time_limit(int theLimit)
++{
++    /* Check parameters */
++    if (theLimit <= 0)
++	return 0;
++
++    if (SIG_ERR == signal(SIGALRM, time_limit_handler))
++        return 0;
++
++    /* Set the alarm for pointed time in seconds */
++    alarm( (unsigned)theLimit );
++
++    return 1;
++} /* set_time_limit */
++
++
+ /* Local Variables: */
+ /* tab-width: 8     */
+ /* End:             */
+--- a/dosfstools-2.11/dosfsck/common.h
++++ b/dosfstools-2.11maemo8/src/common.h
+@@ -2,13 +2,8 @@
+ 
+ /* Written 1993 by Werner Almesberger */
+ 
+-#include <linux/version.h>
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 0)
+-# define __KERNEL__
+ # include <asm/types.h>
+-# undef __KERNEL__
+ # define MSDOS_FAT12 4084 /* maximum number of clusters in a 12 bit FAT */
+-#endif
+ 
+ #ifndef _COMMON_H
+ #define _COMMON_H
+@@ -21,12 +16,12 @@ void pdie(char *msg,...) __attribute((noreturn));
+ 
+ /* Like die, but appends an error message according to the state of errno. */
+ 
+-void *alloc(int size);
++void *alloc(size_t size);
+ 
+ /* mallocs SIZE bytes and returns a pointer to the data. Terminates the program
+    if malloc fails. */
+ 
+-void *qalloc(void **root,int size);
++void *qalloc(void **root,size_t size);
+ 
+ /* Like alloc, but registers the data area in a list described by ROOT. */
+ 
+@@ -43,4 +38,9 @@ char get_key(char *valid,char *prompt);
+ /* Displays PROMPT and waits for user input. Only characters in VALID are
+    accepted. Terminates the program on EOF. Returns the character. */
+ 
++int set_time_limit(int theLimit);
++/* Set pointed time limit in seconds and enable alarm. When alarm raised
++   check the file system status and exits with result of check.
++   ATTENTION: shall not be used with write option */
++
+ #endif
+--- a/dosfstools-2.11/dosfsck/dosfsck.c
++++ b/dosfstools-2.11maemo8/src/dosfsck.c
+@@ -6,7 +6,7 @@
+  * by Roman Hodek <Roman.Hodek@informatik.uni-erlangen.de> */
+ 
+ 
+-#include "../version.h"
++#include "version.h"
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -22,6 +22,7 @@
+ #include "fat.h"
+ #include "file.h"
+ #include "check.h"
++#include "osso-mem.h"
+ 
+ 
+ int interactive = 0,list = 0,test = 0,verbose = 0,write_immed = 0;
+@@ -40,6 +41,7 @@ static void usage(char *name)
+     fprintf(stderr,"  -f       salvage unused chains to files\n");
+     fprintf(stderr,"  -l       list path names\n");
+     fprintf(stderr,"  -n       no-op, check non-interactively without changing\n");
++    fprintf(stderr,"  -p       same as -a, for compat with other *fsck\n");
+     fprintf(stderr,"  -r       interactively repair the file system\n");
+     fprintf(stderr,"  -t       test for bad clusters\n");
+     fprintf(stderr,"  -u path  try to undelete that (non-directory) file\n");
+@@ -47,6 +49,9 @@ static void usage(char *name)
+     fprintf(stderr,"  -V       perform a verification pass\n");
+     fprintf(stderr,"  -w       write changes to disk immediately\n");
+     fprintf(stderr,"  -y       same as -a, for compat with other *fsck\n");
++    fprintf(stderr,"  -m       Maemo addition: MBs to spare in the system under high threshold (default 0, don't check)\n");
++    fprintf(stderr,"  -T secs  Maemo addition: no-op time limited check for pointed duration\n");
++    fprintf(stderr,"  -I       Maemo addition: ignore trivial errors like 'Free Cluster Summary wrong'. Do not use with repair!\n");
+     exit(2);
+ }
+ 
+@@ -84,18 +89,22 @@ int main(int argc,char **argv)
+ {
+     DOS_FS fs;
+     int rw,salvage_files,verify,c;
++	unsigned n_files_check=0, n_files_verify=0;
+     unsigned long free_clusters;
++    int megs_to_spare = 0;
++    int skip_trivial_errors = 0;
+ 
+     rw = salvage_files = verify = 0;
+     interactive = 1;
+     check_atari();
+ 
+-    while ((c = getopt(argc,argv,"Aad:flnrtu:vVwy")) != EOF)
++    while ((c = getopt(argc,argv,"Aad:flnprtu:vVwyIm:T:")) != EOF)
+ 	switch (c) {
+ 	    case 'A': /* toggle Atari format */
+ 	  	atari_format = !atari_format;
+ 		break;
+ 	    case 'a':
++	    case 'p':
+ 	    case 'y':
+ 		rw = 1;
+ 		interactive = 0;
+@@ -110,6 +119,9 @@ int main(int argc,char **argv)
+ 	    case 'l':
+ 		list = 1;
+ 		break;
++	    case 'm':
++		megs_to_spare = atoi(optarg);
++		break;
+ 	    case 'n':
+ 		rw = 0;
+ 		interactive = 0;
+@@ -134,6 +146,22 @@ int main(int argc,char **argv)
+ 	    case 'w':
+ 		write_immed = 1;
+ 		break;
++	    case 'T':
++		if ( set_time_limit( atoi(optarg) ) )
++                {
++		    rw = 0;
++		    printf("dosfsck: no-op time limited check mode selected\n");
++                }
++                else
++                {
++		    printf("dosfsck: problems during selection time limited check mode\n");
++                    return 2;
++                }
++		break;
++	    case 'I':
++		rw = 0;
++		skip_trivial_errors = 1;
++		break;
+ 	    default:
+ 		usage(argv[0]);
+ 	}
+@@ -143,23 +171,31 @@ int main(int argc,char **argv)
+     }
+     if (optind != argc-1) usage(argv[0]);
+ 
++    if (megs_to_spare && osso_mem_saw_enable(1024 * 1024 * megs_to_spare, 0, NULL, NULL)) {
++	printf("osso_mem_saw_enable failed\n");
++	return 2;
++    }
++
+     printf( "dosfsck " VERSION ", " VERSION_DATE ", FAT32, LFN\n" );
+     fs_open(argv[optind],rw);
+-    read_boot(&fs);
++    read_boot(&fs, skip_trivial_errors);
+     if (verify) printf("Starting check/repair pass.\n");
+     while (read_fat(&fs), scan_root(&fs)) qfree(&mem_queue);
+     if (test) fix_bad(&fs);
+     if (salvage_files) reclaim_file(&fs);
+-    else reclaim_free(&fs);
+-    free_clusters = update_free(&fs);
++    else reclaim_free(&fs, skip_trivial_errors);
++    free_clusters = update_free(&fs, skip_trivial_errors);
+     file_unused();
+     qfree(&mem_queue);
++	n_files_check = n_files;
+     if (verify) {
++		n_files = 0;
+ 		printf("Starting verification pass.\n");
+ 		read_fat(&fs);
+ 		scan_root(&fs);
+-	reclaim_free(&fs);
++		reclaim_free(&fs, skip_trivial_errors);
+ 		qfree(&mem_queue);
++		n_files_verify = n_files;
+     }
+ 
+     if (fs_changed()) {
+--- a/dosfstools-2.11/dosfsck/dosfsck.h
++++ b/dosfstools-2.11maemo8/src/dosfsck.h
+@@ -14,13 +14,8 @@
+ #define _LINUX_STRING_H_	/* hack to avoid inclusion of <linux/string.h>*/
+ #define _LINUX_FS_H             /* hack to avoid inclusion of <linux/fs.h> */
+ 
+-#include <linux/version.h>
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 0)
+-# define __KERNEL__
+ # include <asm/types.h>
+ # include <asm/byteorder.h>
+-# undef __KERNEL__
+-#endif
+ 
+ #include <linux/msdos_fs.h>
+ 
+@@ -148,8 +143,8 @@ typedef struct _dos_file {
+ } DOS_FILE;
+ 
+ typedef struct {
+-    unsigned long value;
+-    unsigned long reserved;
++    unsigned int value : 28; /* 12 or 16 bits, 28 bits with FAT32 */
++    unsigned int reserved : 4; /* 4 bits with FAT32, otherwise unused */
+     DOS_FILE *owner;
+     int prev; /* number of previous clusters */
+ } FAT_ENTRY;
+--- a/dosfstools-2.11/dosfsck/dosfslabel.c
++++ b/dosfstools-2.11maemo8/src/dosfslabel.c
+@@ -5,7 +5,7 @@
+  * Portions copyright 1993 Werner Almesberger.
+  */
+ 
+-#include "../version.h"
++#include "version.h"
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -99,12 +99,13 @@ int main(int argc, char *argv[])
+     }
+ 
+     fs_open(device, rw);
+-    read_boot(&fs);
++    read_boot(&fs, 0);
+     if (!rw) {
+         fprintf(stdout, "%s\n", fs.label);
+         exit(0);
+     }
+ 
+     write_label(&fs, label);
+-    return fs_close(rw) ? 1 : 0;
++    fs_close(rw);
++    return 0;
+ }
+--- a/dosfstools-2.11/dosfsck/fat.c
++++ b/dosfstools-2.11maemo8/src/fat.c
+@@ -53,6 +53,7 @@ void read_fat(DOS_FS *fs)
+     unsigned long i;
+     void *first,*second = NULL;
+     int first_ok,second_ok;
++    int msg_to_print = 100, total_msg = 0, msg_printed = 0;
+ 
+     eff_size = ((fs->clusters+2ULL)*fs->fat_bits+7)/8ULL;
+     first = alloc(eff_size);
+@@ -98,6 +99,7 @@ void read_fat(DOS_FS *fs)
+ 	    exit(1);
+ 	}
+     }
++    /* first contains now the valid FAT, so this can be freed */
+     if (second) {
+           free(second);
+     }
+@@ -106,9 +108,17 @@ void read_fat(DOS_FS *fs)
+     for (i = 2; i < fs->clusters+2; i++)
+ 	if (fs->fat[i].value >= fs->clusters+2 &&
+ 	    (fs->fat[i].value < FAT_MIN_BAD(fs))) {
+-	    printf("Cluster %ld out of range (%ld > %ld). Setting to EOF.\n",
++            if (msg_to_print >= msg_printed) {
++	    printf("Cluster %ld out of range (%d > %ld). Setting to EOF.\n",
+ 		   i-2,fs->fat[i].value,fs->clusters+2-1);
++            ++msg_printed;
++            }
+ 	    set_fat(fs,i,-1);
++            ++total_msg;
++	}
++    if (total_msg - msg_printed > 0) {
++        printf("Skipped %d 'Cluster N out of range...' messages.\n",
++               total_msg - msg_printed);
+     }
+     free(first);
+ }
+@@ -212,7 +222,7 @@ void fix_bad(DOS_FS *fs)
+ }
+ 
+ 
+-void reclaim_free(DOS_FS *fs)
++void reclaim_free(DOS_FS *fs, int skip_trivial_errors)
+ {
+     int reclaimed;
+     unsigned long i;
+@@ -223,7 +233,9 @@ void reclaim_free(DOS_FS *fs)
+     for (i = 2; i < fs->clusters+2; i++)
+ 	if (!get_owner(fs,i) && fs->fat[i].value &&
+ 	    !FAT_IS_BAD(fs,fs->fat[i].value)) {
++	    if ( !skip_trivial_errors ) {
+ 	    	set_fat(fs,i,0);
++	    }
+ 	    reclaimed++;
+ 	}
+     if (reclaimed)
+@@ -313,7 +325,7 @@ void reclaim_file(DOS_FS *fs)
+ }
+ 
+ 
+-unsigned long update_free(DOS_FS *fs)
++unsigned long update_free(DOS_FS *fs, int skip_trivial_errors)
+ {
+     unsigned long i;
+     unsigned long free = 0;
+@@ -351,9 +363,11 @@ unsigned long update_free(DOS_FS *fs)
+     if (do_set) {
+ 	fs->free_clusters = free;
+ 	free = CT_LE_L(free);
++	if ( !skip_trivial_errors ) {
+ 		fs_write(fs->fsinfo_start+offsetof(struct info_sector,free_clusters),
+ 		 	sizeof(free),&free);
+ 	}
++    }
+ 
+     return free;
+ }
+--- a/dosfstools-2.11/dosfsck/fat.h
++++ b/dosfstools-2.11maemo8/src/fat.h
+@@ -47,7 +47,7 @@ void fix_bad(DOS_FS *fs);
+ 
+ /* Scans the disk for currently unused bad clusters and marks them as bad. */
+ 
+-void reclaim_free(DOS_FS *fs);
++void reclaim_free(DOS_FS *fs, int skip_trivial_errors);
+ 
+ /* Marks all allocated, but unused clusters as free. */
+ 
+@@ -57,7 +57,7 @@ void reclaim_file(DOS_FS *fs);
+    for them in the root directory. Also tries to fix all inconsistencies (e.g.
+    loops, shared clusters, etc.) in the process. */
+ 
+-unsigned long update_free(DOS_FS *fs);
++unsigned long update_free(DOS_FS *fs, int skip_trivial_errors);
+ 
+ /* Updates free cluster count in FSINFO sector. */
+ 
+--- a/dosfstools-2.11/dosfsck/file.c
++++ b/dosfstools-2.11maemo8/src/file.c
+@@ -16,12 +16,7 @@
+ #define _LINUX_STRING_H_	/* hack to avoid inclusion of <linux/string.h>*/
+ #define _LINUX_FS_H             /* hack to avoid inclusion of <linux/fs.h> */
+ 
+-#include <linux/version.h>
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 0)
+-# define __KERNEL__
+ # include <asm/types.h>
+-# undef __KERNEL__
+-#endif
+ 
+ #include <linux/msdos_fs.h>
+ 
+--- a/dosfstools-2.11/mkdosfs/mkdosfs.c
++++ b/dosfstools-2.11maemo8/src/mkdosfs.c
+@@ -47,11 +47,11 @@
+ 
+ /* Include the header files */
+ 
+-#include "../version.h"
++#include "version.h"
+ 
+ #include <fcntl.h>
+ #include <linux/hdreg.h>
+-#include <linux/fs.h>
++#include <sys/mount.h>
+ #include <linux/fd.h>
+ #include <endian.h>
+ #include <mntent.h>
+@@ -66,12 +66,7 @@
+ #include <time.h>
+ #include <errno.h>
+ 
+-#include <linux/version.h>
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 0)
+-# define __KERNEL__
+ # include <asm/types.h>
+-# undef __KERNEL__
+-#endif
+ 
+ #if __BYTE_ORDER == __BIG_ENDIAN
+ 
+@@ -751,8 +746,8 @@ establish_params (int device_num,int size)
+     {
+       /* Can we get the drive geometry? (Note I'm not too sure about */
+       /* whether to use HDIO_GETGEO or HDIO_REQ) */
+-      if (ioctl (dev, HDIO_GETGEO, &geometry)) {
+-	printf ("unable to get drive geometry, using default 255/63");
++      if (ioctl (dev, HDIO_GETGEO, &geometry) || geometry.sectors == 0 || geometry.heads == 0) {
++	printf ("unable to get drive geometry, using default 255/63\n");
+         bs.secs_track = CT_LE_W(63);
+         bs.heads = CT_LE_W(255);
+       }
+@@ -769,17 +764,18 @@ establish_params (int device_num,int size)
+ 	  size_fat = 32;
+       }
+       if (size_fat == 32) {
+-	  /* For FAT32, try to do the same as M$'s format command:
+-	   * fs size < 256M: 0.5k clusters
+-	   * fs size <   8G: 4k clusters
+-	   * fs size <  16G: 8k clusters
+-	   * fs size >= 16G: 16k clusters
++	  /* For FAT32, try to do the same as M$'s format command
++	   * (see http://www.win.tue.nl/~aeb/linux/fs/fat/fatgen103.pdf p. 20):
++	   * fs size <= 260M: 0.5k clusters
++	   * fs size <=   8G: 4k clusters
++	   * fs size <=  16G: 8k clusters
++	   * fs size >   16G: 16k clusters
+ 	   */
+ 	  unsigned long sz_mb =
+ 	      (blocks+(1<<(20-BLOCK_SIZE_BITS))-1) >> (20-BLOCK_SIZE_BITS);
+-	  bs.cluster_size = sz_mb >= 16*1024 ? 32 :
+-			    sz_mb >=  8*1024 ? 16 :
+-			    sz_mb >=     256 ?  8 :
++	  bs.cluster_size = sz_mb > 16*1024 ? 32 :
++			    sz_mb >  8*1024 ? 16 :
++			    sz_mb >     260 ?  8 :
+ 					       1;
+       }
+       else {
+@@ -1036,6 +1032,8 @@ setup_tables (void)
+ 	break;
+ 
+       case 32:
++	if (clust32 < MIN_CLUST_32)
++	  fprintf(stderr, "WARNING: Not enough clusters for a 32 bit FAT!\n");
+ 	cluster_count = clust32;
+ 	fat_length = fatlength32;
+ 	bs.fat_length = CT_LE_W(0);
+@@ -1737,6 +1735,11 @@ main (int argc, char **argv)
+         }
+     }
+ 
++  if (sector_size > 4096)
++    fprintf(stderr,
++            "Warning: sector size is set to %d > 4096, such filesystem will not propably mount\n",
++            sector_size);
++
+   establish_params (statbuf.st_rdev,statbuf.st_size);
+                                 /* Establish the media parameters */
+ 
+--- /dev/null
++++ b/dosfstools-2.11maemo8/src/osso-log.h
+@@ -0,0 +1,290 @@
++/**
++  @file osso-log.h
++  The OSSO logging macros. Version: 20 Mar 2005.
++  <p>
++  Macro definitions that have an effect to the logging macros:
++  
++  DEBUG, OSSOLOG_COMPILE    Whether to compile the macros
++                            (prefer OSSOLOG_COMPILE over DEBUG)
++  OSSOLOG_STDOUT            All logging to stdout(*
++  OSSOLOG_STDERR            All logging to stderr(*
++
++  *) No timestamp nor file name.
++
++  To see the logging output of D-Bus-activated programs, define
++  DBUS_DEBUG_OUTPUT environment variable for the D-Bus daemon and
++  define the OSSOLOG_STDERR macro at compile time.
++
++  Note that these macros are provided because Glib logging does not
++  currently allow stripping the logging function calls away at
++  compile time.
++
++  ---
++
++  This file is part of libosso.
++ 
++  Copyright (C) 2004-2005 Nokia Corporation. All rights reserved.
++ 
++  Contact: Kimmo Hämäläinen <kimmo.hamalainen@nokia.com>
++ 
++  This library is free software; you can redistribute it and/or
++  modify it under the terms of the GNU Lesser General Public License
++  version 2.1 as published by the Free Software Foundation.
++ 
++  This library is distributed in the hope that it will be useful, but
++  WITHOUT ANY WARRANTY; without even the implied warranty of
++  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++  Lesser General Public License for more details.
++ 
++  You should have received a copy of the GNU Lesser General Public
++  License along with this library; if not, write to the Free Software
++  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++  02110-1301 USA
++*/
++
++#ifndef OSSO_LOG_H
++#define OSSO_LOG_H
++
++#ifdef DEBUG
++#define OSSOLOG_COMPILE
++#endif
++
++#ifdef OSSOLOG_COMPILE
++#if defined OSSOLOG_STDOUT || defined OSSOLOG_STDERR
++#include <stdio.h> /* printf(), fprintf() */
++#else
++#include <syslog.h> /* syslog(), openlog(), closelog() */
++#endif
++#endif
++
++/*** the macros ***/
++
++#ifdef OSSOLOG_COMPILE
++
++/* the binary has logging compiled in */
++
++#if !defined OSSOLOG_STDOUT && !defined OSSOLOG_STDERR
++
++/* log to the syslog */
++
++#define ULOG_CRIT(...) syslog(LOG_CRIT | LOG_USER, __VA_ARGS__)
++#define ULOG_ERR(...) syslog(LOG_ERR | LOG_USER, __VA_ARGS__)
++#define ULOG_WARN(...) syslog(LOG_WARNING | LOG_USER, __VA_ARGS__)
++#define ULOG_INFO(...) syslog(LOG_INFO | LOG_USER, __VA_ARGS__)
++#define ULOG_DEBUG(...) syslog(LOG_DEBUG | LOG_USER, __VA_ARGS__)
++#define ULOG_CRIT_L(FMT, ARG...) syslog(LOG_CRIT | LOG_USER, \
++	"%s:%d: " FMT, __FILE__, __LINE__, ## ARG)
++#define ULOG_ERR_L(FMT, ARG...) syslog(LOG_ERR | LOG_USER, \
++	"%s:%d: " FMT, __FILE__, __LINE__, ## ARG)
++#define ULOG_WARN_L(FMT, ARG...) syslog(LOG_WARNING | LOG_USER, \
++	"%s:%d: " FMT, __FILE__, __LINE__, ## ARG)
++#define ULOG_INFO_L(FMT, ARG...) syslog(LOG_INFO | LOG_USER, \
++	"%s:%d: " FMT, __FILE__, __LINE__, ## ARG)
++#define ULOG_DEBUG_L(FMT, ARG...) syslog(LOG_DEBUG | LOG_USER, \
++	"%s:%d: " FMT, __FILE__, __LINE__, ## ARG)
++#define ULOG_CRIT_F(FMT, ARG...) syslog(LOG_CRIT | LOG_USER, \
++	"%s:%d: " FMT, __FUNCTION__, __LINE__, ## ARG)
++#define ULOG_ERR_F(FMT, ARG...) syslog(LOG_ERR | LOG_USER, \
++	"%s:%d: " FMT, __FUNCTION__, __LINE__, ## ARG)
++#define ULOG_WARN_F(FMT, ARG...) syslog(LOG_WARNING | LOG_USER, \
++	"%s:%d: " FMT, __FUNCTION__, __LINE__, ## ARG)
++#define ULOG_INFO_F(FMT, ARG...) syslog(LOG_INFO | LOG_USER, \
++	"%s:%d: " FMT, __FUNCTION__, __LINE__, ## ARG)
++#define ULOG_DEBUG_F(FMT, ARG...) syslog(LOG_DEBUG | LOG_USER, \
++	"%s:%d: " FMT, __FUNCTION__, __LINE__, ## ARG)
++
++#define DLOG_CRIT(...) syslog(LOG_CRIT | LOG_DAEMON, __VA_ARGS__)
++#define DLOG_ERR(...) syslog(LOG_ERR | LOG_DAEMON, __VA_ARGS__)
++#define DLOG_WARN(...) syslog(LOG_WARNING | LOG_DAEMON, __VA_ARGS__)
++#define DLOG_INFO(...) syslog(LOG_INFO | LOG_DAEMON, __VA_ARGS__)
++#define DLOG_DEBUG(...) syslog(LOG_DEBUG | LOG_DAEMON, __VA_ARGS__)
++#define DLOG_CRIT_L(FMT, ARG...) syslog(LOG_CRIT | LOG_DAEMON, \
++	"%s:%d: " FMT, __FILE__, __LINE__, ## ARG)
++#define DLOG_ERR_L(FMT, ARG...) syslog(LOG_ERR | LOG_DAEMON, \
++	"%s:%d: " FMT, __FILE__, __LINE__, ## ARG)
++#define DLOG_WARN_L(FMT, ARG...) syslog(LOG_WARNING | LOG_DAEMON, \
++	"%s:%d: " FMT, __FILE__, __LINE__, ## ARG)
++#define DLOG_INFO_L(FMT, ARG...) syslog(LOG_INFO | LOG_DAEMON, \
++	"%s:%d: " FMT, __FILE__, __LINE__, ## ARG)
++#define DLOG_DEBUG_L(FMT, ARG...) syslog(LOG_DEBUG | LOG_DAEMON, \
++	"%s:%d: " FMT, __FILE__, __LINE__, ## ARG)
++#define DLOG_CRIT_F(FMT, ARG...) syslog(LOG_CRIT | LOG_DAEMON, \
++	"%s:%d: " FMT, __FUNCTION__, __LINE__, ## ARG)
++#define DLOG_ERR_F(FMT, ARG...) syslog(LOG_ERR | LOG_DAEMON, \
++	"%s:%d: " FMT, __FUNCTION__, __LINE__, ## ARG)
++#define DLOG_WARN_F(FMT, ARG...) syslog(LOG_WARNING | LOG_DAEMON, \
++	"%s:%d: " FMT, __FUNCTION__, __LINE__, ## ARG)
++#define DLOG_INFO_F(FMT, ARG...) syslog(LOG_INFO | LOG_DAEMON, \
++	"%s:%d: " FMT, __FUNCTION__, __LINE__, ## ARG)
++#define DLOG_DEBUG_F(FMT, ARG...) syslog(LOG_DEBUG | LOG_DAEMON, \
++	"%s:%d: " FMT, __FUNCTION__, __LINE__, ## ARG)
++
++#define ULOG_OPEN(X) openlog(X, LOG_PID | LOG_NDELAY, LOG_USER)
++#define DLOG_OPEN(X) openlog(X, LOG_PID | LOG_NDELAY, LOG_DAEMON)
++#define LOG_CLOSE() closelog()
++
++#elif defined OSSOLOG_STDOUT
++
++/* log to the stdout */
++
++#define ULOG_CRIT(...) (printf(__VA_ARGS__),printf("\n"))
++#define ULOG_ERR(...) (printf(__VA_ARGS__),printf("\n"))
++#define ULOG_WARN(...) (printf(__VA_ARGS__),printf("\n"))
++#define ULOG_INFO(...) (printf(__VA_ARGS__),printf("\n"))
++#define ULOG_DEBUG(...) (printf(__VA_ARGS__),printf("\n"))
++#define ULOG_CRIT_L(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define ULOG_ERR_L(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define ULOG_WARN_L(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define ULOG_INFO_L(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define ULOG_DEBUG_L(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define ULOG_CRIT_F(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++#define ULOG_ERR_F(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++#define ULOG_WARN_F(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++#define ULOG_INFO_F(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++#define ULOG_DEBUG_F(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++
++#define DLOG_CRIT(...) (printf(__VA_ARGS__),printf("\n"))
++#define DLOG_ERR(...) (printf(__VA_ARGS__),printf("\n"))
++#define DLOG_WARN(...) (printf(__VA_ARGS__),printf("\n"))
++#define DLOG_INFO(...) (printf(__VA_ARGS__),printf("\n"))
++#define DLOG_DEBUG(...) (printf(__VA_ARGS__),printf("\n"))
++#define DLOG_CRIT_L(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define DLOG_ERR_L(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define DLOG_WARN_L(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define DLOG_INFO_L(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define DLOG_DEBUG_L(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define DLOG_CRIT_F(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++#define DLOG_ERR_F(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++#define DLOG_WARN_F(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++#define DLOG_INFO_F(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++#define DLOG_DEBUG_F(FMT, ARG...) printf(\
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++
++#define ULOG_OPEN(X) do {} while (0)
++#define DLOG_OPEN(X) do {} while (0)
++#define LOG_CLOSE() do {} while (0)
++
++#else 
++
++/* log to the stderr */
++
++#define ULOG_CRIT(...) (fprintf(stderr, __VA_ARGS__),fprintf(stderr, "\n"))
++#define ULOG_ERR(...) (fprintf(stderr, __VA_ARGS__),fprintf(stderr, "\n"))
++#define ULOG_WARN(...) (fprintf(stderr, __VA_ARGS__),fprintf(stderr, "\n"))
++#define ULOG_INFO(...) (fprintf(stderr, __VA_ARGS__),fprintf(stderr, "\n"))
++#define ULOG_DEBUG(...) (fprintf(stderr, __VA_ARGS__),fprintf(stderr, "\n"))
++#define ULOG_CRIT_L(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define ULOG_ERR_L(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define ULOG_WARN_L(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define ULOG_INFO_L(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define ULOG_DEBUG_L(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define ULOG_CRIT_F(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++#define ULOG_ERR_F(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++#define ULOG_WARN_F(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++#define ULOG_INFO_F(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++#define ULOG_DEBUG_F(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++
++#define DLOG_CRIT(...) (fprintf(stderr, __VA_ARGS__),fprintf(stderr, "\n"))
++#define DLOG_ERR(...) (fprintf(stderr, __VA_ARGS__),fprintf(stderr, "\n"))
++#define DLOG_WARN(...) (fprintf(stderr, __VA_ARGS__),fprintf(stderr, "\n"))
++#define DLOG_INFO(...) (fprintf(stderr, __VA_ARGS__),fprintf(stderr, "\n"))
++#define DLOG_DEBUG(...) (fprintf(stderr, __VA_ARGS__),fprintf(stderr, "\n"))
++#define DLOG_CRIT_L(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define DLOG_ERR_L(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define DLOG_WARN_L(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define DLOG_INFO_L(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define DLOG_DEBUG_L(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FILE__, __LINE__, ## ARG)
++#define DLOG_CRIT_F(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++#define DLOG_ERR_F(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++#define DLOG_WARN_F(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++#define DLOG_INFO_F(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++#define DLOG_DEBUG_F(FMT, ARG...) fprintf(stderr, \
++	"%s:%d: " FMT "\n", __FUNCTION__, __LINE__, ## ARG)
++
++#define ULOG_OPEN(X) do {} while (0)
++#define DLOG_OPEN(X) do {} while (0)
++#define LOG_CLOSE() do {} while (0)
++
++#endif /* !defined OSSOLOG_STDOUT && !defined OSSOLOG_STDERR */
++
++#else
++
++/* no logging is compiled to the binary */
++
++#define ULOG_CRIT(...) do {} while (0)
++#define ULOG_ERR(...) do {} while (0)
++#define ULOG_WARN(...) do {} while (0)
++#define ULOG_INFO(...) do {} while (0)
++#define ULOG_DEBUG(...) do {} while (0)
++#define ULOG_CRIT_L(...) do {} while (0)
++#define ULOG_ERR_L(...) do {} while (0)
++#define ULOG_WARN_L(...) do {} while (0)
++#define ULOG_INFO_L(...) do {} while (0)
++#define ULOG_DEBUG_L(...) do {} while (0)
++#define ULOG_CRIT_F(...) do {} while (0)
++#define ULOG_ERR_F(...) do {} while (0)
++#define ULOG_WARN_F(...) do {} while (0)
++#define ULOG_INFO_F(...) do {} while (0)
++#define ULOG_DEBUG_F(...) do {} while (0)
++
++#define DLOG_CRIT(...) do {} while (0)
++#define DLOG_ERR(...) do {} while (0)
++#define DLOG_WARN(...) do {} while (0)
++#define DLOG_INFO(...) do {} while (0)
++#define DLOG_DEBUG(...) do {} while (0)
++#define DLOG_CRIT_L(...) do {} while (0)
++#define DLOG_ERR_L(...) do {} while (0)
++#define DLOG_WARN_L(...) do {} while (0)
++#define DLOG_INFO_L(...) do {} while (0)
++#define DLOG_DEBUG_L(...) do {} while (0)
++#define DLOG_CRIT_F(...) do {} while (0)
++#define DLOG_ERR_F(...) do {} while (0)
++#define DLOG_WARN_F(...) do {} while (0)
++#define DLOG_INFO_F(...) do {} while (0)
++#define DLOG_DEBUG_F(...) do {} while (0)
++
++#define ULOG_OPEN(X) do {} while (0)
++#define DLOG_OPEN(X) do {} while (0)
++#define LOG_CLOSE() do {} while (0)
++
++#endif /* OSSOLOG_COMPILE */
++
++#endif /* OSSO_LOG_H */
+--- /dev/null
++++ b/dosfstools-2.11maemo8/src/osso-mem.c
+@@ -0,0 +1,731 @@
++/* ========================================================================= *
++ * File: osso-mem.c
++ *
++ * This file is part of libosso
++ *
++ * Copyright (C) 2005-2009 Nokia Corporation. All rights reserved.
++ *
++ * Contact: Leonid Moiseichuk <leonid.moiseichuk@nokia.com>
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public License
++ * version 2.1 as published by the Free Software Foundation.
++ *
++ * This library is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
++ */
++
++/* ========================================================================= *
++ * Includes
++ * ========================================================================= */
++
++#include <fcntl.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <unistd.h>
++#include <malloc.h>
++#include <errno.h>
++#include <pthread.h>
++#include <string.h>
++#include <inttypes.h>
++#include <time.h>
++
++#include "osso-log.h"
++#include "osso-mem.h"
++
++
++/* ========================================================================= *
++ * Definitions.
++ * ========================================================================= */
++
++/* Compile-time array capacity calculation */
++#define CAPACITY(a)  (sizeof(a) / sizeof(*a))
++
++/* Correct division of 2 unsigned values */
++#define DIVIDE(a,b)  (((a) + ((b) >> 1)) / (b))
++
++#define NSIZE        ((size_t)(-1))
++
++typedef void* (*malloc_hook_t)(size_t, const void*);
++
++
++/* ========================================================================= *
++ * Meminfo related strings.
++ * WARNING: be careful, micro-optimizations here made code a bit fuzzy.
++ * ========================================================================= */
++
++/* Defining the labels we could read from the /proc/meminfo               */
++/* Done in a little tricky way to have strlen's calculated @ compile time */
++#define MEMINFO_LABELS    \
++            IV_PAIR(ID_MEMTOTAL,    "MemTotal:" ) \
++            IV_PAIR(ID_SWAPTOTAL,   "SwapTotal:") \
++            IV_PAIR(ID_MEMFREE,     "MemFree:"  ) \
++            IV_PAIR(ID_BUFFERS,     "Buffers:"  ) \
++            IV_PAIR(ID_CACHED,      "Cached:"   ) \
++            IV_PAIR(ID_SWAPFREE,    "SwapFree:" )
++
++/* Definition of specially labeled string */
++/* WARNING: re-defined below !!!          */
++#define IV_PAIR(ID,STRING) \
++            static const char _localstring_##ID[]=STRING;
++
++/* Introduce labeled strings */
++MEMINFO_LABELS
++
++/* Re-defining pair as a <string, size> */
++#undef IV_PAIR
++#define IV_PAIR(ID,STRING) \
++            { _localstring_##ID, CAPACITY(_localstring_##ID) -1 },
++
++/* Introduce array of strings and sizes */
++static const struct
++{
++   const char* name;
++   unsigned    length;
++} meminfo_labels[] =
++{
++   MEMINFO_LABELS
++};
++
++/* Re-defining one more time to have IDs for conveinience */
++#undef IV_PAIR
++#define IV_PAIR(ID,STRING)    ID,
++
++enum
++{
++    MEMINFO_LABELS
++    MAX_MEMINFO_LABELS
++};
++
++#undef IV_PAIR
++
++/* Initializer for values array (load_meminfo)*/
++#define IV_PAIR(ID,STRING)    0,
++#define MEMINFO_INIT          MEMINFO_LABELS
++
++
++/* ========================================================================= *
++ * Local data.
++ * ========================================================================= */
++
++/* For lowmem_ functions system limits */
++static size_t sys_avail_ram    = NSIZE;
++static size_t sys_avail_memory = NSIZE;
++static size_t sys_deny_limit   = NSIZE;
++static size_t sys_lowmem_limit = NSIZE;
++
++/* SAW-related */
++static pthread_mutex_t saw_lock = PTHREAD_MUTEX_INITIALIZER;
++
++#define THREAD_LOCK()      pthread_mutex_lock(&saw_lock)
++#define THREAD_UNLOCK()    pthread_mutex_unlock(&saw_lock)
++
++/* Parameters of the latest SAW setup call */
++static size_t saw_max_block_size;      /* If allocation is greater - make a test       */
++static size_t saw_max_heap_size;       /* If heap is greater that specified - call OOM */
++
++/* This function shall be called when OOM occurs or close */
++static osso_mem_saw_oom_func_t saw_user_oom_func = NULL;
++static void*  saw_user_context;        /* Extra data for user OOM function */
++
++/* Original malloc hook which may be NULL */
++static malloc_hook_t saw_old_malloc_hook = NULL;
++
++
++/* ========================================================================= *
++ * Local methods.
++ * ========================================================================= */
++
++/* ------------------------------------------------------------------------- *
++ * get_file_value - gets the value (size or %) from specified /proc file.
++ * Returns NSIZE if file is not available or value is invalid.
++ * ------------------------------------------------------------------------- */
++
++static size_t get_file_value(const char* filename)
++{
++   FILE* fp = fopen(filename, "r");
++
++   if (fp)
++   {
++      /* File opened successfuly, trying to load value */
++      char  buffer[32];
++
++      /* Get the value as a string */
++      if (NULL == fgets(buffer, CAPACITY(buffer) - 1, fp))
++         *buffer = 0;
++      fclose(fp);
++
++      /* Convert it, much faster than fscanf */
++      if ( *buffer )
++      {
++         const long value = strtol(buffer, NULL, 0);
++
++         if (value > 0)
++            return (size_t)value;
++      }
++   }
++
++   /* Any kind of error */
++   return NSIZE;
++} /* get_file_value */
++
++/* ------------------------------------------------------------------------- *
++ * load_meminfo -- open meminfo file and load values.
++ * parameters:
++ *    vals - array of values to be handled.
++ *    size - size of vals array.
++ * returns: number of sucessfully loaded values.
++ * ------------------------------------------------------------------------- */
++static unsigned load_meminfo(size_t *vals, unsigned size)
++{
++   FILE* meminfo = fopen("/proc/meminfo", "r");
++
++   if ( meminfo )
++   {
++      unsigned counter = 0;
++      char line[256];
++
++      /* Load all lines in file until we need setup values */
++      while (counter < size && fgets(line, CAPACITY(line), meminfo))
++      {
++         unsigned idx;
++
++         for (idx = 0; idx < size; idx++)
++         {
++            /* Skip all indicies that already set */
++            if ( vals[idx] )
++               continue;
++
++            /* Skip values that have different labels */
++            if ( strncmp(line, meminfo_labels[idx].name, meminfo_labels[idx].length) )
++               continue;
++
++            /* Match, save the value */
++            vals[idx] = (size_t)strtoul(line + meminfo_labels[idx].length + 1, NULL, 0);
++            counter++;
++
++            /* Exit from scanning loop */
++            break;
++         } /* for */
++      } /* for all values and meminfo lines */
++
++      fclose(meminfo);
++      return counter;
++   }
++
++   return 0;
++} /* load_meminfo */
++
++/* ------------------------------------------------------------------------- *
++ * get_free_pages - gets the free pages from /proc.
++ * Returns NSIZE if file is not available or value is invalid.
++ * ------------------------------------------------------------------------- */
++static size_t get_free_pages(void)
++{
++   return get_file_value("/proc/sys/vm/lowmem_free_pages");
++} /* get_free_pages */
++
++/* ------------------------------------------------------------------------- *
++ * setup_sys_values - loads the values from /proc files or obtain its from
++ * system andand setup sys_XXX variables.
++ * WARNING: we expect than sys_XXX variables are not changed during runtime.
++ * ------------------------------------------------------------------------- */
++static void setup_sys_values(void)
++{
++   /* Setup the page size */
++   const size_t pagesize = sysconf(_SC_PAGESIZE);
++   /* Load amount of allowed pages */
++   const size_t allowed_pages = get_file_value("/proc/sys/vm/lowmem_allowed_pages");
++   /* One field Total should be loaded from meminfo */
++   size_t    total   = 0;    /* ID_MEMTOTAL goes first */
++   const int counter = load_meminfo(&total, 1);
++
++   /* Setup available amount of RAM, if no meminfo available set 64MB */
++   sys_avail_ram = (counter && total ? (total >> 2) : (64 << 10));
++
++   /* Check the availability of values */
++   if (NSIZE == allowed_pages)
++   {
++      /* Setup available amount of memory */
++      sys_avail_memory = sys_avail_ram;
++   }
++   else
++   {
++      sys_avail_memory = allowed_pages * (pagesize >> 10);
++      sys_deny_limit   = get_file_value("/proc/sys/vm/lowmem_deny_watermark");
++      sys_lowmem_limit = get_file_value("/proc/sys/vm/lowmem_notify_high");
++   }
++
++   /* Normalize the sys_deny_limit and sys_lowmem_limit according to loaded values */
++   if (NSIZE == sys_deny_limit)
++      sys_deny_limit = sys_avail_memory - (sys_avail_memory >> 5);
++   else
++      sys_deny_limit = DIVIDE(sys_avail_memory * sys_deny_limit, 100);
++
++   if (NSIZE == sys_lowmem_limit)
++   {
++      sys_lowmem_limit = sys_deny_limit;
++   }
++   else
++   {
++      /* Calibrate amount avaliable RAM and memory using sys_lowmem_limit percentage */
++      sys_lowmem_limit = DIVIDE(sys_avail_memory * sys_lowmem_limit, 100);
++   }
++
++   /* Moving from KB to bytes */
++   sys_avail_ram    <<= 10;
++   sys_avail_memory <<= 10;
++   sys_deny_limit   <<= 10;
++   sys_lowmem_limit <<= 10;
++} /* setup_sys_values */
++
++
++/* ------------------------------------------------------------------------- *
++ * saw_malloc_hook - Malloc hook. Executed when osso_mem_saw_active is in
++ * place. Thread-safe (= slow in some cases).
++ * ------------------------------------------------------------------------- */
++static void* saw_malloc_hook(size_t size, const void* caller)
++{
++   static unsigned count = 0; /* Validation count per number of allocations */
++   void* ptr;       /* Allocated pointer, NULL means OOM situation happened */
++
++   THREAD_LOCK();
++
++   /* Restore the real malloc hook */
++   __malloc_hook = saw_old_malloc_hook;
++
++   /* Check for OOM-potential situation by size or allocated blocks counter */
++   if (size >= saw_max_block_size || !count)
++   {
++      /* We must test amount of memory to predict future */
++      const struct mallinfo mi = mallinfo();
++      ptr = (mi.arena + mi.hblkhd + size >= saw_max_heap_size || osso_mem_in_lowmem_state() ? NULL : malloc(size));
++      count = 1024;
++   }
++   else
++   {
++      ptr = malloc(size);
++      count--;
++   }
++
++   /* Restore malloc hook to self */
++   __malloc_hook = saw_malloc_hook;
++
++   /* Test allocation, call OOM function if necessary  */
++   /* Note: SAW may be removed but that is safe for us */
++   if ( !ptr )
++   {
++      count = 0;  /* force the next validation */
++      if (saw_user_oom_func)
++         saw_user_oom_func(saw_max_heap_size + size, saw_max_heap_size, saw_user_context);
++   }
++
++   THREAD_UNLOCK();
++
++#ifdef LIBOSSO_DEBUG
++   /* Printing from the critical section is a bad idea, try to do it now */
++   if ( !ptr )
++      ULOG_INFO_F("SAW: OOM for %u allocation", size);
++#endif
++
++   return ptr;
++} /* saw_malloc_hook */
++
++
++/* ========================================================================= *
++ * Public methods.
++ * ========================================================================= */
++
++/* ------------------------------------------------------------------------- *
++ * osso_mem_get_usage -- returns memory usage for current system in
++ * osso_mem_usage_t structure. This function uses cached information
++ * internally because every call is expensive for system. Please use
++ * osso_mem_get_usage_now if you ready to pay for performance penalty.
++ *
++ * parameters:
++ *    usage - parameters to be updated.
++ * returns:
++ *    0 if values loaded successfuly OR negative error code.
++ * ------------------------------------------------------------------------- */
++int osso_mem_get_usage(osso_mem_usage_t* usage)
++{
++   /* Cached values */
++   static time_t           cache_stamp;
++   static size_t           cache_pfree;
++   static osso_mem_usage_t cache_usage;
++   /* Current values */
++   time_t   stamp;
++   size_t   pfree;
++   int      error;
++
++   /* Check parameter */
++   if ( !usage )
++      return -1;
++
++   /* We should use cached information if calls comes in one second */
++   stamp = time(NULL);
++   if (stamp == cache_stamp)
++   {
++      memcpy(usage, &cache_usage, sizeof(*usage));
++      return 0;
++   }
++
++   /* We should use cached information if amount of free pages not changed */
++   pfree = get_free_pages();
++   if (pfree == cache_pfree)
++   {
++      cache_stamp = stamp;
++      memcpy(usage, &cache_usage, sizeof(*usage));
++      return 0;
++   }
++
++   /* Finally we have to load a new value from /proc/meminfo */
++   error = osso_mem_get_usage_now(usage);
++   if ( !error )
++   {
++      cache_stamp = stamp;
++      cache_pfree = pfree;
++      memcpy(&cache_usage, usage, sizeof(cache_usage));
++   }
++
++   return error;
++} /* osso_mem_get_usage */
++
++/* ------------------------------------------------------------------------- *
++ * osso_mem_get_usage_now -- returns memory usage for current system in
++ * osso_mem_usage_t structure.This function is very expensive for system.
++ * Please use osso_mem_get_usage if you can.
++ *
++ * parameters:
++ *    usage - parameters to be updated.
++ * returns:
++ *    0 if values loaded successfuly OR negative error code.
++ * ------------------------------------------------------------------------- */
++int osso_mem_get_usage_now(osso_mem_usage_t* usage)
++{
++   /* Local variables */
++   size_t vals[MAX_MEMINFO_LABELS];
++
++   /* Check the pointer validity first */
++   if ( !usage )
++      return -1;
++
++   /* Load values from /proc/meminfo file */
++   memset(usage, 0, sizeof(*usage));
++   memset(vals,  0, sizeof(vals));
++   if ( !load_meminfo(vals, CAPACITY(vals)) )
++      return -1;
++
++   /* Initialize values for /proc/sys/vm/lowmem_* */
++   if (NSIZE == sys_avail_memory)
++      setup_sys_values();
++
++   /* Discover memory information using loaded numbers */
++   usage->total = vals[ID_MEMTOTAL] + vals[ID_SWAPTOTAL];
++   usage->free  = vals[ID_MEMFREE] + vals[ID_BUFFERS] +
++                  vals[ID_CACHED] +  vals[ID_SWAPFREE];
++
++   usage->used = usage->total - usage->free;
++   usage->util = DIVIDE(100 * usage->used, usage->total);
++
++   /* Translate everything from kilobytes to bytes */
++   usage->total <<= 10;
++   usage->free  <<= 10;
++   usage->used  <<= 10;
++
++   usage->deny = sys_deny_limit;
++   usage->low  = sys_lowmem_limit;
++
++   /*
++    * From the usage->free we deduct the delta based on deny limit
++    * or 87.5% if low limit is disabled
++    */
++   usage->usable = (usage->low ? sys_avail_memory - usage->low : (sys_avail_memory >> 3));
++   usage->usable = (usage->usable < usage->free ? usage->free - usage->usable : 0);
++
++   /* We have succeed */
++   return 0;
++} /* osso_mem_get_usage_now */
++
++
++
++/* ------------------------------------------------------------------------- *
++ * Returns the total allocated RAM in system according to
++ * /proc/sys/vm/lowmem_* files. If system has swap available only RAM
++ * should be counted.
++ *
++ * WARNING: Assumes 97% of memory can be allocated if no limits set (kernel)
++ * hardcoded threshold.
++ * ------------------------------------------------------------------------- */
++size_t osso_mem_get_avail_ram(void)
++{
++   if(NSIZE == sys_avail_ram)
++      setup_sys_values();
++   return sys_avail_ram;
++} /* osso_mem_get_avail_ram */
++
++/* ------------------------------------------------------------------------- *
++ * Returns amount of currently available memory in system below high memory
++ * usage watermark. If system has swap available it also counted.
++ * ------------------------------------------------------------------------- */
++size_t osso_mem_get_free(void)
++{
++   static size_t pg_high;
++   static size_t pg_size;
++   const  size_t pg_free = get_free_pages();
++
++   if ( !pg_high )
++   {
++      pg_high = get_file_value("/proc/sys/vm/lowmem_notify_high_pages");
++      pg_size = sysconf(_SC_PAGESIZE);
++   }
++
++   if (NSIZE == pg_high || NSIZE == pg_free)
++      return osso_mem_get_avail_ram();
++   else
++      return (pg_free > pg_high ? (pg_free - pg_high) * pg_size: 0);
++} /* osso_mem_get_free */
++
++/* ------------------------------------------------------------------------- *
++ * Returns deny limit (in bytes, the total allocated RAM in system)
++ * according to /proc/sys/vm/lowmem_* settings.
++ *
++ * WARNING: Assumes 97% of memory can be allocated if no limits set (kernel)
++ * hardcoded threshold.
++ * ------------------------------------------------------------------------- */
++size_t osso_mem_get_deny_limit(void)
++{
++   if(NSIZE == sys_deny_limit)
++      setup_sys_values();
++   return sys_deny_limit;
++} /* osso_mem_get_deny_limit */
++
++/* ------------------------------------------------------------------------- *
++ * Returns low memory (lowmem_high_limit, the total allocated RAM in system)
++ * according to /proc/sys/vm/lowmem_* settings.
++ *
++ * WARNING: Assumes 97% of memory can be allocated if no limits set (kernel)
++ * hardcoded threshold.
++ * ------------------------------------------------------------------------- */
++size_t osso_mem_get_lowmem_limit(void)
++{
++   if(NSIZE == sys_lowmem_limit)
++      setup_sys_values();
++   return sys_lowmem_limit;
++} /* osso_mem_get_lowmem_limit */
++
++/* ------------------------------------------------------------------------- *
++ * Returns flag about low memory conditions is reached according to
++ * /sys/kernel/high_watermark is set to 1.
++ *
++ * WARNING: under scratchbox always return 0.
++ * ------------------------------------------------------------------------- */
++int osso_mem_in_lowmem_state(void)
++{
++   return (1 == get_file_value("/sys/kernel/high_watermark"));
++} /* osso_mem_in_lowmem_state */
++
++/* ------------------------------------------------------------------------- *
++ * osso_mem_saw_enable - enables Simple Allocation Watchdog.
++ * 1. Calculates the possible growth of process' heap based on the
++ *    current heap stats, adjusted to the threshold
++ * 2. sets up the hook on malloc function; if the particular allocatuion
++ *    whose size is bigger than watchblock could violate the limit,
++ *    oom_func with user-specified context is called and malloc returns 0
++ *
++ * Parameters:
++ * - threshold - amount of memory that shall be free in system.
++ * - watchblock - if allocation size more than specified the amount of
++ *   available memory must be tested. If 0 passed this parameter should be
++ *   set to page size.
++ * - oom_func - this function shall be called if we reach high memory
++ *   consumption (OOM level), specified by threshold or NULL malloc occurs.
++ *   May be NULL.
++ * - context - additional parameter that shall be passed into oom_func.
++ *
++ * Returns: 0 on success, negative on error
++ *
++ * Note: can be safely called several times.
++ *
++ * WARNING: if SAW can not be installed the old one will be active.
++ * ------------------------------------------------------------------------- */
++int osso_mem_saw_enable(size_t threshold,
++                  size_t watchblock,
++                  osso_mem_saw_oom_func_t oom_func,
++                  void* context
++            )
++{
++   osso_mem_usage_t current;
++   size_t           available;
++
++   /* Validate passed parameters. */
++   if ( !watchblock )
++      watchblock = sysconf(_SC_PAGESIZE);
++
++   /* Load the values about memory usage */
++   if( osso_mem_get_usage(&current) )
++   {
++      ULOG_CRIT_F("Error:osso_mem_get_usage failed");
++      return -EINVAL;
++   }
++
++   /* How much memory can we use to keep system alive */
++   available = (sys_avail_ram < current.usable ? sys_avail_ram : current.usable);
++
++   /* If we're below the threshold, don't make things worse */
++   if(threshold > 0 && available > threshold)
++   {
++      const struct mallinfo mi = mallinfo();
++
++      THREAD_LOCK();
++
++      saw_user_oom_func  = oom_func;
++      saw_max_heap_size  = mi.arena + mi.hblkhd + available - threshold;
++      saw_max_block_size = watchblock;
++      saw_user_context   = context;
++      if(saw_malloc_hook != __malloc_hook)
++      {
++         /* SAW hook is not set */
++         saw_old_malloc_hook = __malloc_hook;
++         __malloc_hook = saw_malloc_hook;
++      }
++
++      THREAD_UNLOCK();
++
++      ULOG_INFO_F("SAW hook installed: block size %u, maxheap %u (threshold %u)",
++                  saw_max_block_size, saw_max_heap_size, threshold);
++
++      return 0;
++   }
++   else
++   {
++      ULOG_WARN_F("SAW: OOM: available(%u) <= threshold(%u)",
++                  available, threshold);
++      return -EINVAL;
++   }
++} /* osso_mem_saw_enable */
++
++/* ------------------------------------------------------------------------- *
++ * osso_mem_saw_disable - disables Simple Allocation Watchdog and restore
++ * default malloc hook.
++ *
++ * Note: can be safely called several times.
++ * ------------------------------------------------------------------------- */
++void osso_mem_saw_disable(void)
++{
++   THREAD_LOCK();
++   if(saw_malloc_hook == __malloc_hook)
++      __malloc_hook = saw_old_malloc_hook;
++   THREAD_UNLOCK();
++
++   ULOG_INFO_F("SAW hook removed!");
++} /* osso_mem_saw_disable */
++
++
++/* ------------------------------------------------------------------------- *
++ * osso_mem_score_adjust - adjust out of memory handling by set
++ * /proc/self/oom_adj to most system-friendly value (15)
++ *
++ * Returns: 0 on success, negative on error
++ * ------------------------------------------------------------------------- */
++int osso_mem_score_adjust(void)
++{
++   int fd = open("/proc/self/oom_adj", O_WRONLY);
++   int rs = (fd >= 0 && 2 == write(fd, "15", 2) ? 0 : -1);
++   close(fd);
++   return rs;
++} /* osso_mem_score_adjust */
++
++
++/* ========================================================================= *
++ * main function, just for testing purposes.
++ * ========================================================================= */
++#ifdef UNIT_TEST
++
++static void test_oom_func(size_t current_sz, size_t max_sz, void* context)
++{
++   printf("%s(%u, %u, 0x%08x) called\n", __FUNCTION__, current_sz, max_sz, (unsigned)context);
++} /* test_oom_func */
++
++
++int main(const int argc, const char* argv[])
++{
++   osso_mem_usage_t usage;
++   const size_t insane = 60 << 20;
++   void* ptr;
++
++   printf("\n* osso_mem_score_adjust() called to update oom_adj: %d\n", osso_mem_score_adjust());
++
++   printf("\n* unit testing for osso_mem_get_usage\n");
++   /* Load all values from meminfo file */
++   if (0 == osso_mem_get_usage(&usage))
++   {
++      printf ("%u\t%u\t%u\t%u\t%u\t%u\n", usage.total, usage.free, usage.used, usage.util, usage.deny, usage.low);
++   }
++   else
++   {
++      printf ("unable to load values from /proc/meminfo file\n");
++      return -1;
++   }
++   /* Make a sleeps and another calls */
++   usleep(1 * 1000 * 1000);
++   osso_mem_get_usage(&usage);
++   usleep(2 * 1000 * 1000);
++   osso_mem_get_usage(&usage);
++   usleep(3 * 1000 * 1000);
++   osso_mem_get_usage(&usage);
++
++   printf("\n* Testing lowmem\n");
++
++   printf("Lowmem limits: LOW=%u bytes, DENY=%u bytes\n",
++            osso_mem_get_lowmem_limit(),
++            osso_mem_get_deny_limit()
++         );
++
++   printf("\n* Testing SAW\n");
++   ptr = malloc( insane );
++   printf("Without SAW, allocating %u bytes: %s\n",insane, ptr ? "Succeeded": "Failed" );
++
++   if(ptr)
++      free(ptr);
++
++   if ( osso_mem_saw_enable(0, 0, NULL, NULL) )
++   {
++      printf("Cannot activate saw\n");
++   }
++
++   ptr = malloc( insane );
++   printf("With SAW, allocating %u bytes: %s\n", insane, ptr ? "Succeeded" : "Failed");
++   if(ptr)
++      free(ptr);
++
++   if ( osso_mem_saw_enable(0, 0, test_oom_func, NULL) )
++      printf("Cannot activate saw with oom function\n");
++
++   ptr = malloc( insane );
++   printf("With SAW, allocating %u bytes: %s\n", insane, ptr ? "Succeeded" : "Failed");
++
++   if ( osso_mem_in_lowmem_state() )
++      printf("\n* Low memory situation is reached\n");
++   else
++      printf("\n* Low memory situation is not reached\n");
++
++   printf("\n* RAM available %u\n", osso_mem_get_avail_ram());
++   printf("\n* free memory available %u\n", osso_mem_get_free());
++
++   if(ptr)
++      free(ptr);
++
++   /* That is all */
++   return 0;
++} /* main */
++
++#endif /* UNIT_TEST */
++
+--- /dev/null
++++ b/dosfstools-2.11maemo8/src/osso-mem.h
+@@ -0,0 +1,177 @@
++/* ========================================================================= *
++ * File: osso-mem.h
++ *
++ * This file is part of libosso
++ *
++ * Copyright (C) 2005-2009 Nokia Corporation. All rights reserved.
++ *
++ * Contact: Leonid Moiseichuk <leonid.moiseichuk@nokia.com>
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public License
++ * version 2.1 as published by the Free Software Foundation.
++ *
++ * This library is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
++ */
++
++#ifndef OSSO_MEM_H
++#define OSSO_MEM_H
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* ========================================================================= *
++ * Includes
++ * ========================================================================= */
++
++#include <unistd.h>
++
++/* ========================================================================= *
++ * Definitions.
++ * ========================================================================= */
++
++/* Structure that used to report about memory consumption */
++typedef struct
++{
++    size_t  total;      /* Total amount of memory in system: RAM + swap */
++    size_t  free;       /* Free memory in system, bytes                 */
++    size_t  used;       /* Used memory in system, bytes                 */
++    size_t  util;       /* Memory utilization in percents               */
++    size_t  low;        /* Low memory limit, bytes.0 if not set or >100%*/
++    size_t  deny;       /* Deny limit, bytes.0 if not set or >100%      */
++    size_t  usable;     /* How much memory available for applications   */
++} osso_mem_usage_t;
++
++/* ------------------------------------------------------------------------- *
++ * A OOM notification function used when SAW determines an OOM condition
++ *	current_sz -- current heap size
++ *	max_sz -- maximum heap size
++ *	context -- user-specified context (see osso_mem_saw_enable)
++ * ------------------------------------------------------------------------- */
++typedef void (*osso_mem_saw_oom_func_t)(size_t current_sz, size_t max_sz,void *context);
++
++/* ========================================================================= *
++ * Methods.
++ * ========================================================================= */
++
++/* ------------------------------------------------------------------------- *
++ * osso_mem_get_usage -- returns current memory usage in the system in a
++ * osso_mem_usage_t structure. This function uses cached information
++ * internally because every call is expensive for the system. Please use
++ * osso_mem_get_usage_now if you are ready to pay the performance penalty.
++ *
++ * parameters:
++ *    usage - parameters to be updated.
++ * returns:
++ *    0 if values loaded successfully OR negative error code.
++ * ------------------------------------------------------------------------- */
++int osso_mem_get_usage(osso_mem_usage_t* usage);
++
++/* ------------------------------------------------------------------------- *
++ * osso_mem_get_usage_now -- returns current memory usage in the system in a
++ * osso_mem_usage_t structure. This function is very expensive for the system.
++ * Please use osso_mem_get_usage if you can.
++ *
++ * parameters:
++ *    usage - parameters to be updated.
++ * returns:
++ *    0 if values loaded successfuly OR negative error code.
++ * ------------------------------------------------------------------------- */
++int osso_mem_get_usage_now(osso_mem_usage_t* usage);
++
++/* ------------------------------------------------------------------------- *
++ * Returns the total allocated RAM in the system according to
++ * /proc/sys/vm/lowmem_* files. The return value concerns only RAM, not swap.
++ *
++ * WARNING: Assumes that 97% of the free RAM can be allocated.
++ * ------------------------------------------------------------------------- */
++size_t osso_mem_get_avail_ram(void);
++
++/* ------------------------------------------------------------------------- *
++ * Returns the amount of currently free memory in the system below the high
++ * memory usage watermark. If the system has swap available, it is also counted.
++ * ------------------------------------------------------------------------- */
++size_t osso_mem_get_free(void);
++
++/* ------------------------------------------------------------------------- *
++ * Returns the deny limit (in bytes, the total allocated RAM in system)
++ * according to /proc/sys/vm/lowmem_* settings.
++ *
++ * WARNING: Assumes that 97% of the free RAM can be allocated.
++ * ------------------------------------------------------------------------- */
++size_t osso_mem_get_deny_limit(void);
++
++/* ------------------------------------------------------------------------- *
++ * Returns the low memory (lowmem_high_limit, the total allocated RAM in system)
++ * according to /proc/sys/vm/lowmem_* settings.
++ *
++ * WARNING: Assumes that 97% of the free RAM can be allocated.
++ * ------------------------------------------------------------------------- */
++size_t osso_mem_get_lowmem_limit(void);
++
++/* ------------------------------------------------------------------------- *
++ * Returns 1 if the device is in the low-memory state.
++ *
++ * WARNING: under Scratchbox always returns 0.
++ * ------------------------------------------------------------------------- */
++int osso_mem_in_lowmem_state(void);
++
++/* ------------------------------------------------------------------------- *
++ * osso_mem_saw_enable - enables Simple Allocation Watchdog.
++ * 1. Calculates the possible growth of the process' heap based on the
++ *    current heap stats, adjusted to the threshold.
++ * 2. Sets up the hook on malloc function; if the particular allocation,
++ *    whose size is bigger than watchblock_sz, could violate the limit,
++ *    oom_func with user-specified context is called and malloc returns 0.
++ *
++ * Parameters:
++ * - threshold - amount of memory used in system. If you pass 0, then maximum
++ *   available should be set (according to lowmem_high_limit)
++ * - watchblock - if allocation size is more than this, the amount of
++ *   available memory is (re)checked. If 0 is passed, this parameter will be
++ *   set to the page size.
++ * - oom_func - this function will be called if we reach high memory
++ *   consumption (OOM level), the threshold level, or if malloc returns NULL.
++ *   May be NULL.
++ * - context - additional parameter that shall be passed into oom_func.
++ *
++ * Returns: 0 on success, negative on error
++ *
++ * Note: can be safely called several times.
++ *
++ * WARNING: if SAW can not be installed, the old one will be active.
++ * ------------------------------------------------------------------------- */
++int osso_mem_saw_enable(size_t threshold,
++               size_t watchblock,
++               osso_mem_saw_oom_func_t oom_func,
++               void *context
++            );
++
++/* ------------------------------------------------------------------------- *
++ * osso_mem_saw_disable - disables Simple Allocation Watchdog and restore
++ * the default malloc hook. If no watchdog was set up, do nothing.
++ * ------------------------------------------------------------------------- */
++void osso_mem_saw_disable(void);
++
++/* ------------------------------------------------------------------------- *
++ * osso_mem_out_adjust - adjust out of memory handling by setting
++ * /proc/self/oom_adj to the most system-friendly value (15)
++ *
++ * Returns: 0 on success, negative on error
++ * ------------------------------------------------------------------------- */
++int osso_mem_score_adjust(void);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* OSSO_MEM_H */
