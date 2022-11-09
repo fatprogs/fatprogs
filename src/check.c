@@ -114,7 +114,7 @@ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
             for (clu_num = prev + 1; clu_num != prev; clu_num++) {
                 uint32_t value;
 
-                if (clu_num >= fs->clusters + FAT_START_ENT)
+                if (clu_num >= max_clus_num)
                     clu_num = FAT_START_ENT;
 
                 get_fat(fs, clu_num, &value);
@@ -374,7 +374,7 @@ static void clear_drop_file(DOS_FS *fs, DOS_FILE *file)
     uint32_t curr;
 
     for (curr = FSTART(file, fs);
-            curr > 0 && curr < fs->clusters + FAT_START_ENT;
+            curr > 0 && curr < max_clus_num;
             curr = next_cluster(fs, curr)) {
         clear_bit(curr, fs->real_bitmap);
         dec_alloc_cluster();
@@ -383,30 +383,8 @@ static void clear_drop_file(DOS_FS *fs, DOS_FILE *file)
 
 static void drop_file(DOS_FS *fs, DOS_FILE *file)
 {
-#if 0
-    uint32_t cluster;
-    int skip_set_owner = 0;
-
-    /* dropping file's ".", ".." entry should not change bitmap of
-     * those entries */
-    if (strncmp((char *)file->dir_ent.name, MSDOS_DOT, LEN_FILE_NAME) ||
-            strncmp((char *)file->dir_ent.name, MSDOS_DOTDOT, LEN_FILE_NAME)) {
-        skip_set_owner = 1;
-    }
-#endif
-
     remove_lfn(fs, file);
     MODIFY(file, name[0], DELETED_FLAG);
-#if 0
-    if (!skip_set_owner) {
-        for (cluster = FSTART(file, fs);
-                cluster > 0 && cluster < fs->clusters + FAT_START_ENT;
-                cluster = next_cluster(fs, cluster)) {
-            if (test_bit(cluster, fs->real_bitmap))
-                clear_bitmap_occupied(fs, cluster);
-        }
-    }
-#endif
     --n_files;
 }
 
@@ -696,12 +674,12 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
 
     }
 
-    if (FSTART(file, fs) >= fs->clusters + FAT_START_ENT) {
+    if (FSTART(file, fs) >= max_clus_num) {
         if (IS_DIR(file->dir_ent.attr)) {
             printf("%s\n  Directory start cluster beyond limit (%u > %u). "
                     "Deleting dir.\n",
                     path_name(file), FSTART(file, fs),
-                    fs->clusters + FAT_START_ENT - 1);
+                    max_clus_num - 1);
             remove_lfn(fs, file);
             MODIFY_START(file, 0, fs);
             MODIFY(file, name[0], DELETED_FLAG);
@@ -717,15 +695,9 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
 
     clusters = prev = 0;
     /* TODO: calling once instead of calling next_cluster() / get_fat() */
-#if 0
-    for (curr = FSTART(file, fs) ? FSTART(file, fs) : -1;
-            curr != -1; curr = next_cluster(fs, curr)) {
-        get_fat(fs, curr, &next_clus);
-#else
     for (curr = FSTART(file, fs) ? FSTART(file, fs) : -1;
             curr != -1; curr = next_clus) {
         next_clus = next_cluster(fs, curr);
-#endif
         if (!next_clus || FAT_IS_BAD(fs, next_clus)) {
             printf("%s\n  Contains a %s cluster (%u). Assuming EOF.\n",
                     path_name(file), next_clus ? "bad" : "free", curr);
@@ -948,15 +920,6 @@ static int check_dir(DOS_FS *fs, DOS_FILE **root, int dots)
             switch (interactive ? get_key("1234", "?") : '3') {
                 case '1':
                     drop_file(fs, *walk);
-#if 0
-                    clear_drop_file(fs, *walk);
-                    for (clus_num = FSTART(parent, fs);
-                            clus_num > 0 && clus_num < fs->clusters + FAT_START_ENT;
-                            clus_num = next_cluster(fs, clus_num)) {
-                        clear_bit(clus_num, fs->real_bitmap);
-                        dec_alloc_cluster();
-                    }
-#endif
                     walk = &(*walk)->next;
                     continue;
                 case '2':
@@ -1066,8 +1029,7 @@ static void check_file_chain(DOS_FS *fs, DOS_FILE *file, int read_test)
 
     prev = clusters = 0;
     for (curr = FSTART(file, fs);
-            curr > 0 && curr < fs->clusters + FAT_START_ENT;
-            curr = next) {
+            curr > 0 && curr < max_clus_num; curr = next) {
 
         next = next_cluster(fs, curr);
 
@@ -1088,13 +1050,8 @@ static void check_file_chain(DOS_FS *fs, DOS_FILE *file, int read_test)
             break;
         }
 
-#if 1
         if (FAT_IS_BAD(fs, next))
             break;
-#else
-        if (bad_cluster(fs, curr))
-            break;
-#endif
 
         if (!read_test) {
             /* keep cluster curr */
@@ -1123,8 +1080,7 @@ static void check_file_chain(DOS_FS *fs, DOS_FILE *file, int read_test)
     }
 
     for (curr = FSTART(file, fs);
-            curr > 0 && curr < fs->clusters + FAT_START_ENT;
-            curr = next_cluster(fs, curr)) {
+            curr > 0 && curr < max_clus_num; curr = next_cluster(fs, curr)) {
 
         if (!clusters--)
             break;
@@ -1159,8 +1115,7 @@ static void undelete(DOS_FS *fs, DOS_FILE *file)
 
         /* CHECK: original code : walk++ is right? */
         walk = value;
-    } while (left && walk >= FAT_START_ENT &&
-            walk < fs->clusters + FAT_START_ENT);
+    } while (left && walk >= FAT_START_ENT && walk < max_clus_num);
 
     if (prev) {
         /* do not set bitmap, because undelete() only called
@@ -1212,7 +1167,6 @@ static void add_file(DOS_FS *fs, DOS_FILE ***chain, DOS_FILE *parent,
                 parent->lfn ? "/" : "",
                 dot ? "." : "..");
 
-#if 1
         if (interactive)
             printf("1) Delete.\n"
                     "2) Auto-rename.\n");
@@ -1228,20 +1182,6 @@ static void add_file(DOS_FS *fs, DOS_FILE ***chain, DOS_FILE *parent,
                 rename_flag = 1;
                 break;
         }
-#else
-        if (interactive)
-            printf("1: Delete.\n"
-                    "2: Keep it.\n");
-        else
-            printf("  Auto-deleting.\n");
-
-        if (!interactive || get_key("12", "?") == '1') {
-            de.name[0] = DELETED_FLAG;
-            fs_write(offset, sizeof(DIR_ENT), &de);
-        }
-
-        return;
-#endif
     }
 
     if ((type = file_type(cp, (char *)de.name)) != fdt_none) {
@@ -2135,7 +2075,7 @@ static int add_dot_entries(DOS_FS *fs, DOS_FILE *parent, int dots)
     /* TODO: use free cluster hint field(info_sector's next_cluster) */
     /* find free cluster */
     for (new_clus = FAT_START_ENT + 1; new_clus != FAT_START_ENT; new_clus++) {
-        if (new_clus >= fs->clusters + FAT_START_ENT)
+        if (new_clus >= max_clus_num)
             new_clus = FAT_START_ENT;
 
         get_fat(fs, new_clus, &next_clus);
@@ -2300,7 +2240,6 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
         if (memcmp(&p_de->ctime_ms, &de->ctime_ms, 7) ||
                     memcmp(&p_de->time, &de->time, 4)) {
             /* copy ctime_ms, ctime, cdate, adate, time, date from self */
-#if 1
             de->ctime_ms = p_de->ctime_ms;
             de->ctime = p_de->ctime;
             de->cdate = p_de->cdate;
@@ -2314,15 +2253,6 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
                     &de->ctime_ms);
             fs_write(dot_file->offset + offsetof(DIR_ENT, time),
                     sizeof(de->time) + sizeof(de->date), &de->time);
-
-#else
-            MODIFY(dot_file, ctime_ms, p_de->ctime_ms);
-            MODIFY(dot_file, ctime, p_de->ctime);
-            MODIFY(dot_file, cdate, p_de->cdate);
-            MODIFY(dot_file, adate, p_de->adate);
-            MODIFY(dot_file, time, p_de->time);
-            MODIFY(dot_file, date, p_de->date);
-#endif
         }
         return 0;
     }
@@ -2383,14 +2313,6 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
                 drop_file(fs, parent);
                 /* parent entry already set real_bitmap and allocation count */
                 clear_drop_file(fs, parent);
-#if 0
-                for (clus_num = FSTART(parent, fs);
-                        clus_num > 0 && clus_num < fs->clusters + FAT_START_ENT;
-                        clus_num = next_cluster(fs, clus_num)) {
-                    clear_bit(clus_num, fs->real_bitmap);
-                    dec_alloc_cluster();
-                }
-#endif
                 return 1;
         }
         return 0;

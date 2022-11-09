@@ -325,7 +325,8 @@ void read_boot(DOS_FS *fs)
     fs->data_start = fs->root_start +
         ROUND_TO_MULTIPLE(fs->root_entries << MSDOS_DIR_BITS, logical_sector_size);
     data_size = (off_t)total_sectors * logical_sector_size - fs->data_start;
-    fs->clusters = data_size / fs->cluster_size;
+    fs->clusters = data_size / fs->cluster_size;    /* total number of clusters */
+    max_clus_num = fs->clusters + FAT_START_ENT;    /* maximun cluster no. */
     fs->root_cluster = 0;   /* indicates standard, pre-FAT32 root dir */
     fs->fsinfo_start = 0;   /* no FSINFO structure */
     fs->free_clusters = -1; /* unknown */
@@ -416,11 +417,6 @@ void read_boot(DOS_FS *fs)
                 "sector size.", logical_sector_size);
     }
 
-#if 0 /* linux kernel doesn't check that either */
-    /* ++roman: On Atari, these two fields are often left uninitialized */
-    if (!atari_format && (!b.sec_per_track || !b.heads))
-        die("Invalid disk format in boot sector.");
-#endif
     if (verbose)
         dump_boot(fs, &b, logical_sector_size);
 }

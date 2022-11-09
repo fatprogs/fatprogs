@@ -37,6 +37,7 @@ dflag_t dump_flag = DUMP_ALL;
 unsigned short reserved_cnt;
 unsigned short sector_size;
 unsigned short sec_per_fat;
+uint32_t max_clus_num;  /* Not used, for removing compile error */
 
 char *buf_clus = NULL;
 char *buf_sec = NULL;

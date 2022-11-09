@@ -68,6 +68,8 @@
 #define IS_FILE(attr)       (((attr) & VFAT_ATTR_MASK) == 0)
 
 extern int atari_format;
+extern uint32_t max_clus_num;
+
 /* value to use as end-of-file marker */
 #define FAT_EOF(fs)	((atari_format ? 0xfff : 0xff8) | FAT_EXTD(fs))
 #define FAT_IS_EOF(fs, v) ((uint32_t)(v) >= (0xff8 | FAT_EXTD(fs)))

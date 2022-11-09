@@ -31,6 +31,8 @@ int atari_format = 0;
 unsigned n_files = 0;
 void *mem_queue = NULL;
 
+uint32_t max_clus_num;
+
 static void usage(char *name)
 {
     fprintf(stderr, "usage: %s [-aAflrtvVwy] [-d path -d ...] "

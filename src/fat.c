@@ -60,8 +60,7 @@ static void init_fat_cache(DOS_FS *fs)
     fs->fat_cache.first_cpc =
         (FAT_CACHE_SIZE - fs->fat_cache.diff) / fs->fat_bits * BITS_PER_BYTE;
     fs->fat_cache.last_cpc =
-        ((fs->clusters + FAT_START_ENT) - fs->fat_cache.first_cpc) %
-        fs->fat_cache.cpc;
+        (max_clus_num - fs->fat_cache.first_cpc) % fs->fat_cache.cpc;
 
     fs->fat_cache.addr = NULL;
 }
@@ -190,10 +189,9 @@ void read_fat(DOS_FS *fs)
             if (!clus_num)
                 continue;
 
-            if (clus_num >= fs->clusters + FAT_START_ENT &&
-                    clus_num < FAT_MIN_BAD(fs)) {
+            if (clus_num >= max_clus_num && clus_num < FAT_MIN_BAD(fs)) {
                 printf("Cluster %u out of range (%u > %u). Setting to EOF.\n",
-                        i, clus_num, fs->clusters + FAT_START_ENT - 1);
+                        i, clus_num, max_clus_num - 1);
                 set_fat(fs, total_cluster + i, -1);
                 set_bit(total_cluster + i, fs->bitmap);
                 continue;
@@ -210,7 +208,7 @@ void read_fat(DOS_FS *fs)
         offset += read_size;
 
         remain_size -= read_size;
-        if (remain_size < read_size)
+        if (remain_size && remain_size < read_size)
             read_size = remain_size;
     }
 
@@ -227,54 +225,49 @@ static void read_fat_cache(DOS_FS *fs, uint32_t cluster)
     loff_t mmap_offset;
     loff_t aligned_offset;
 
-    if (cluster > fs->clusters + FAT_START_ENT) {
-        die("cluster number is more than max cluster number\n");
+    if (cluster > max_clus_num) {
+        die("cluster number is more than max cluster number. exit!\n");
     }
 
-    /* fat cache doesn't hit */
-//    if (!(cluster >= fs->fat_cache.start &&
-//            cluster < fs->fat_cache.start + fs->fat_cache.cnt)) {
-        mmap_offset = fs->fat_start + cluster * fs->fat_bits / BITS_PER_BYTE;
-        aligned_offset = mmap_offset & ~(sysconf(_SC_PAGE_SIZE) - 1);
+    mmap_offset = fs->fat_start + cluster * fs->fat_bits / BITS_PER_BYTE;
+    aligned_offset = mmap_offset & ~(sysconf(_SC_PAGE_SIZE) - 1);
 
-        /* fat_start is already page aligned address */
-        if (fs->fat_cache.diff == 0) {
-            fs->fat_cache.cnt = fs->fat_cache.cpc;
-            fs->fat_cache.start = (cluster >= FAT_START_ENT) ?
-                (cluster / fs->fat_cache.cpc) *  fs->fat_cache.cpc : 0;
+    /* fat_start is already page aligned address */
+    if (fs->fat_cache.diff == 0) {
+        fs->fat_cache.cnt = fs->fat_cache.cpc;
+        fs->fat_cache.start = (cluster >= FAT_START_ENT) ?
+            (cluster / fs->fat_cache.cpc) *  fs->fat_cache.cpc : 0;
+    }
+    /* fat_start is not page aligned address */
+    else {
+        /* first cache */
+        if (cluster >= 0 && cluster < fs->fat_cache.first_cpc) {
+            fs->fat_cache.start = 0;
+            fs->fat_cache.cnt = fs->fat_cache.first_cpc;
         }
-        /* fat_start is not page aligned address */
+        /* last cache */
+        else if (cluster >= max_clus_num - fs->fat_cache.last_cpc) {
+            fs->fat_cache.start =
+                ((cluster - fs->fat_cache.first_cpc) / fs->fat_cache.cpc) *
+                fs->fat_cache.cpc + fs->fat_cache.first_cpc;
+            fs->fat_cache.cnt = fs->fat_cache.last_cpc;
+        }
+        /* others */
         else {
-            /* first cache */
-            if (cluster >= 0 && cluster < fs->fat_cache.first_cpc) {
-                fs->fat_cache.start = 0;
-                fs->fat_cache.cnt = fs->fat_cache.first_cpc;
-            }
-            /* last cache */
-            else if (cluster >=
-                    (fs->clusters + FAT_START_ENT) - fs->fat_cache.last_cpc) {
-                fs->fat_cache.start =
-                    ((cluster - fs->fat_cache.first_cpc) / fs->fat_cache.cpc) *
-                    fs->fat_cache.cpc + fs->fat_cache.first_cpc;
-                fs->fat_cache.cnt = fs->fat_cache.last_cpc;
-            }
-            /* others */
-            else {
-                fs->fat_cache.cnt = fs->fat_cache.cpc;
-                fs->fat_cache.start =
-                    ((cluster - fs->fat_cache.first_cpc) / fs->fat_cache.cpc) *
-                    fs->fat_cache.cpc + fs->fat_cache.first_cpc;
-            }
+            fs->fat_cache.cnt = fs->fat_cache.cpc;
+            fs->fat_cache.start =
+                ((cluster - fs->fat_cache.first_cpc) / fs->fat_cache.cpc) *
+                fs->fat_cache.cpc + fs->fat_cache.first_cpc;
         }
+    }
 
-        /* munmap for previous memory mapping and mmap new FAT area
-         * that include cluster */
-        if (fs->fat_cache.start != -1) {
-            fs_munmap(fs->fat_cache.addr, FAT_CACHE_SIZE);
-        }
+    /* munmap for previous memory mapping and mmap new FAT area
+     * that include cluster */
+    if (fs->fat_cache.start != -1) {
+        fs_munmap(fs->fat_cache.addr, FAT_CACHE_SIZE);
+    }
 
-        fs->fat_cache.addr = fs_mmap(NULL, aligned_offset, FAT_CACHE_SIZE);
-//    }
+    fs->fat_cache.addr = fs_mmap(NULL, aligned_offset, FAT_CACHE_SIZE);
 }
 
 void get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value)
@@ -310,7 +303,6 @@ void get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value)
             uint32_t data;
 
             clus_size = 4;
-#if 1
             if (!(cluster >= fs->fat_cache.start &&
                         cluster < fs->fat_cache.start + fs->fat_cache.cnt)) {
                 read_fat_cache(fs, cluster);
@@ -323,11 +315,6 @@ void get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value)
             /* offset in block device */
             offset = fs->fat_start + cluster * clus_size;
             fs_find_data_copy(offset, clus_size, &data);
-#else
-            /* offset in device */
-            offset = fs->fat_start + cluster * clus_size;
-            fs_read(offset, clus_size, &data);
-#endif
 
             /* According to MS, the high 4 bits of a FAT32 entry are reserved and
              * are not part of the cluster number. So we cut them off. */
@@ -415,6 +402,7 @@ uint32_t next_cluster(DOS_FS *fs, uint32_t cluster)
     uint32_t next_clus;
 
     get_fat(fs, cluster, &next_clus);
+
     if (FAT_IS_BAD(fs, next_clus))
         die("Internal error: next_cluster on bad cluster");
 
@@ -491,7 +479,7 @@ void fix_bad(DOS_FS *fs)
     /* use reclaim_bitmap to check bad cluster in this function temporarily */
     memcpy(fs->reclaim_bitmap, fs->real_bitmap, fs->bitmap_size);
 
-    for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
+    for (i = FAT_START_ENT; i < max_clus_num; i++) {
         if (test_bit(i, fs->reclaim_bitmap)) {
             /* TODO: check 64bit at once */
             if (fs->real_bitmap[i / BITS_PER_LONG] == 0xffffffff) {
@@ -526,7 +514,7 @@ void reclaim_free(DOS_FS *fs)
     set_exclusive_bitmap(fs);
 
     /* Do not set bitmap in reclaim routine */
-    for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
+    for (i = FAT_START_ENT; i < max_clus_num; i++) {
         if (!test_bit(i, fs->real_bitmap)) {
             /* TODO: check 64bit at once */
             if (fs->real_bitmap[i / BITS_PER_LONG] == 0) {
@@ -557,7 +545,7 @@ static void find_start_clusters(DOS_FS *fs)
     uint32_t next_clus;
     uint32_t cnt;
 
-    for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
+    for (i = FAT_START_ENT; i < max_clus_num; i++) {
         if (!test_bit(i, fs->real_bitmap)) {
             /* TODO: check 64bit at once */
             if (fs->real_bitmap[i / BITS_PER_LONG] == 0) {
@@ -613,7 +601,7 @@ void reclaim_file(DOS_FS *fs)
     /* TODO: below 'for' loop can be moved into after find_start_clusters() 'for' loop */
     /* check if orphan cluster chain has normal cluster.
      * if then, set EOF to orphan cluster's value. */
-    for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
+    for (i = FAT_START_ENT; i < max_clus_num; i++) {
         uint32_t value;
 
         /* TODO: check 64bit at once */
@@ -628,7 +616,7 @@ void reclaim_file(DOS_FS *fs)
         }
 
         get_fat(fs, i, &next);
-        if (next && next < fs->clusters + FAT_START_ENT) {
+        if (next && next < max_clus_num) {
             get_fat(fs, next, &value);
             /* In case that i's next cluster is already in other cluster chain
              * or i's next cluster has wrong cluster value */
@@ -643,7 +631,7 @@ void reclaim_file(DOS_FS *fs)
     find_start_clusters(fs);
 
     files = reclaimed = 0;
-    for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
+    for (i = FAT_START_ENT; i < max_clus_num; i++) {
         /* TODO: can check 64bit at once? */
         if (fs->real_bitmap[i / BITS_PER_LONG] == 0) {
             i = ((i / BITS_PER_LONG) * BITS_PER_LONG) + BITS_PER_LONG - 1;
@@ -676,7 +664,7 @@ void reclaim_file(DOS_FS *fs)
             clus_cnt = 1;
             prev = i;
             for (walk = next_cluster(fs, i);
-                    walk > 0 && walk < fs->clusters + FAT_START_ENT;
+                    walk > 0 && walk < max_clus_num;
                     walk = next_cluster(fs, walk)) {
 
                 if (test_bit(walk, fs->real_bitmap)) {
@@ -713,13 +701,13 @@ uint32_t update_free(DOS_FS *fs)
     uint32_t free = 0;
     int do_set = 0;
 
-#if 0
+#if 0 //DEBUG
     uint32_t i;
     uint32_t next;
     int temp_cnt = 0;
 
     /* TODO: to improve performance like as read_fat() */
-    for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
+    for (i = FAT_START_ENT; i < max_clus_num; i++) {
         get_fat(fs, i, &next);
         if (!next) {
             ++free;
@@ -727,7 +715,7 @@ uint32_t update_free(DOS_FS *fs)
         else
             temp_cnt++;
     }
-    printf("calculated free2(get_fat) %d, alloced clusters %d\n", free, temp_cnt);
+    printf("Calculated free %d, allocated clusters %d\n", free, temp_cnt);
 #endif
 
     free = fs->clusters - alloc_clusters;
