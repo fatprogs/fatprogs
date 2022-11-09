@@ -404,7 +404,8 @@ static int __find_lfn(DOS_FS *fs, DOS_FILE *parent, loff_t offset,
         return 0;
     }
 
-    if (memcmp(de.name, file->dir_ent.name, 11) == 0) {
+    if (memcmp(de.name, file->dir_ent.name, 11) == 0 &&
+            offset == file->offset) {
         /* found */
         return 1;
     }
