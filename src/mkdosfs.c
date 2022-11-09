@@ -176,6 +176,29 @@ char dummy_boot_code[BOOTCODE_SIZE] =
 
 #define MESSAGE_OFFSET 29	/* Offset of message in above code */
 
+#define error(str)				\
+    do {						\
+        free_mem(fat);					\
+        if (fsinfo)        \
+            free_mem(fsinfo);	\
+        free_mem(root_dir);				\
+        die(str);					\
+    } while (0)
+
+#define seekto(pos,errstr)						\
+    do {									\
+        loff_t __pos = (pos);						\
+        if (llseek(dev, __pos, SEEK_SET) != __pos)				\
+            error("seek to " errstr " failed whilst writing tables");	\
+    } while (0)
+
+#define writebuf(buf, size, errstr)			\
+    do {							\
+        int __size = (size);				\
+        if (write(dev, buf, __size) != __size)		\
+            error("failed whilst writing " errstr);	\
+    } while (0)
+
 /* Global variables - the root of all evil :-) - see these and weep! */
 
 static char *template_boot_code;	/* Variable to store a full template boot sector in */
@@ -194,7 +217,7 @@ static int backup_boot = 0;	/* Sector# of backup boot sector */
 static int reserved_sectors = 0;/* Number of reserved sectors */
 static int badblocks = 0;	/* Number of bad blocks in the filesystem */
 static int nr_fats = 2;		/* Default number of FATs to produce */
-static int size_fat = 0;	/* Size in bits of FAT entries */
+static int fat_bits = 0;	/* Size in bits of FAT entries */
 static int size_fat_by_user = 0; /* 1 if FAT size user selected */
 static int dev = -1;		/* FS block device file handle */
 static int  ignore_full_disk = 0; /* Ignore warning about 'full' disk devices */
@@ -202,7 +225,7 @@ static off_t currently_testing = 0;	/* Block currently being tested (if autodete
 static struct boot_sector bs;	/* Boot sector data */
 static int start_data_sector;	/* Sector number for the start of the data area */
 static int start_data_block;	/* Block number for the start of the data area */
-static unsigned char *fat;	/* File allocation table */
+static unsigned char *fat = NULL;	/* File allocation table */
 static unsigned char *fsinfo;	/* FAT32 info sector */
 static struct dir_entry *root_dir;	/* Root directory */
 static int size_root_dir;	/* Size of the root directory in bytes */
@@ -210,6 +233,9 @@ static int sectors_per_cluster = 0;	/* Number of sectors per disk cluster */
 static int root_dir_entries = 0;	/* Number of root directory entries */
 static char *blank_sector;		/* Blank sector - all zeros */
 static int hidden_sectors = 0;		/* Number of hidden sectors */
+
+static unsigned int fat_size;   /* size of FAT (bytes) */
+static off_t fat_start;     /* start offset of FAT */
 
 /* Function prototype definitions */
 
@@ -242,7 +268,12 @@ static void fatal_error(const char *fmt_string)
 /* Mark the specified cluster as having a particular value */
 static void mark_FAT_cluster(int cluster, unsigned int value)
 {
-    switch (size_fat) {
+    unsigned char data[4];
+    uint32_t saved;
+    int i;
+
+    saved = value;
+    switch (fat_bits) {
         case 12:
             value &= 0x0fff;
             if (((cluster * 3) & 0x1) == 0) {
@@ -268,10 +299,14 @@ static void mark_FAT_cluster(int cluster, unsigned int value)
 
         case 32:
             value &= 0xfffffff;
-            fat[4 * cluster] = (unsigned char)(value & 0x000000ff);
-            fat[(4 * cluster) + 1] = (unsigned char)((value & 0x0000ff00) >> 8);
-            fat[(4 * cluster) + 2] = (unsigned char)((value & 0x00ff0000) >> 16);
-            fat[(4 * cluster) + 3] = (unsigned char)((value & 0xff000000) >> 24);
+            *(uint32_t *)data =
+                CT_LE_L((value & 0xfffffff) | (saved & 0xf0000000));
+
+            for (i = 0; i < nr_fats; i++) {
+                seekto((fat_size * i) + fat_start + 4 * cluster,
+                        "mark_FAT_cluster");
+                writebuf(&data, 4, "mark_FAT_cluster");
+            }
             break;
 
         default:
@@ -666,13 +701,13 @@ def_hd_params:
         bs.dir_entries[0] = (char)0;	/* Default to 512 entries */
         bs.dir_entries[1] = (char)2;
 
-        if (!size_fat && blocks * SECTORS_PER_BLOCK > 1064960) {
+        if (!fat_bits && blocks * SECTORS_PER_BLOCK > 1064960) {
             if (verbose)
                 printf("Auto-selecting FAT32 for large filesystem\n");
-            size_fat = 32;
+            fat_bits = 32;
         }
 
-        if (size_fat == 32) {
+        if (fat_bits == 32) {
             /* For FAT32, try to do the same as M$'s format command:
              * fs size < 256M: 0.5k clusters
              * fs size <   8G: 4k clusters
@@ -700,7 +735,7 @@ static void setup_tables(void)
     unsigned cluster_count = 0, sec_per_fat;
     unsigned fatdata;			/* Sectors for FATs + data area */
     struct tm *ctime;
-    struct volume_info *vi = (size_fat == 32 ? &bs.fat32.vi : &bs.oldfat.vi);
+    struct volume_info *vi = (fat_bits == 32 ? &bs.fat32.vi : &bs.oldfat.vi);
 
     if (atari_format)
         /* On Atari, the first few bytes of the boot sector are assigned
@@ -713,7 +748,7 @@ static void setup_tables(void)
     if (sectors_per_cluster)
         bs.sec_per_clus = (char)sectors_per_cluster;
 
-    if (size_fat == 32) {
+    if (fat_bits == 32) {
         /* Under FAT32, the root dir is in a cluster chain, and this is
          * signalled by bs.dir_entries being 0. */
         bs.dir_entries[0] = bs.dir_entries[1] = (char)0;
@@ -751,11 +786,11 @@ static void setup_tables(void)
 
         memcpy(bs.boot_jump, dummy_boot_jump, 3);
         /* Patch in the correct offset to the boot code */
-        bs.boot_jump[1] = ((size_fat == 32 ?
+        bs.boot_jump[1] = ((fat_bits == 32 ?
                     (char *)&bs.fat32.boot_code :
                     (char *)&bs.oldfat.boot_code) - (char *)&bs) - 2;
 
-        if (size_fat == 32) {
+        if (fat_bits == 32) {
             int offset = (char *)&bs.fat32.boot_code -
                 (char *)&bs + MESSAGE_OFFSET + 0x7c00;
 
@@ -781,9 +816,9 @@ static void setup_tables(void)
                 bs.boot_jump[0], bs.boot_jump[1]);
 
     if (!reserved_sectors)
-        reserved_sectors = (size_fat == 32) ? 32 : 1;
+        reserved_sectors = (fat_bits == 32) ? 32 : 1;
     else {
-        if (size_fat == 32 && reserved_sectors < 2)
+        if (fat_bits == 32 && reserved_sectors < 2)
             die("On FAT32 at least 2 reserved sectors are needed.");
     }
 
@@ -793,7 +828,7 @@ static void setup_tables(void)
         printf("Using %d reserved sectors\n", reserved_sectors);
 
     bs.nfats = (char) nr_fats;
-    if (!atari_format || size_fat == 32)
+    if (!atari_format || fat_bits == 32)
         bs.hidden = bs.sec_per_track;
     else {
         /* In Atari format, hidden is a 16 bit field */
@@ -876,7 +911,7 @@ static void setup_tables(void)
 
             /* The < 4078 avoids that the filesystem will be misdetected as having a
              * 12 bit FAT. */
-            if (clust16 < FAT12_THRESHOLD && !(size_fat_by_user && size_fat == 16)) {
+            if (clust16 < FAT12_THRESHOLD && !(size_fat_by_user && fat_bits == 16)) {
                 if (verbose >= 2)
                     printf(clust16 < FAT12_THRESHOLD ?
                             "FAT16: would be misdetected as FAT12\n" :
@@ -897,7 +932,7 @@ static void setup_tables(void)
                 maxclust32 = MAX_CLUST_32;
 
             if (clust32 && clust32 < MIN_CLUST_32 &&
-                    !(size_fat_by_user && size_fat == 32)) {
+                    !(size_fat_by_user && fat_bits == 32)) {
                 clust32 = 0;
                 if (verbose >= 2)
                     printf("FAT32: not enough clusters (%d)\n", MIN_CLUST_32);
@@ -913,9 +948,9 @@ static void setup_tables(void)
                     printf("FAT32: too much clusters\n");
             }
 
-            if ((clust12 && (size_fat == 0 || size_fat == 12)) ||
-                    (clust16 && (size_fat == 0 || size_fat == 16)) ||
-                    (clust32 && size_fat == 32))
+            if ((clust12 && (fat_bits == 0 || fat_bits == 12)) ||
+                    (clust16 && (fat_bits == 0 || fat_bits == 16)) ||
+                    (clust32 && fat_bits == 32))
                 break;
 
             bs.sec_per_clus <<= 1;
@@ -923,13 +958,13 @@ static void setup_tables(void)
 
         /* Use the optimal FAT size if not specified;
          * FAT32 is (not yet) choosen automatically */
-        if (!size_fat) {
-            size_fat = (clust16 > clust12) ? 16 : 12;
+        if (!fat_bits) {
+            fat_bits = (clust16 > clust12) ? 16 : 12;
             if (verbose >= 2)
-                printf("Choosing %d bits for FAT\n", size_fat);
+                printf("Choosing %d bits for FAT\n", fat_bits);
         }
 
-        switch (size_fat) {
+        switch (fat_bits) {
             case 12:
                 cluster_count = clust12;
                 sec_per_fat = sec_per_fat12;
@@ -979,11 +1014,11 @@ static void setup_tables(void)
          * this fs is for a floppy disk, if the user hasn't explicitly requested a
          * size.
          */
-        if (!size_fat)
-            size_fat = (num_sectors == 1440 || num_sectors == 2400 ||
+        if (!fat_bits)
+            fat_bits = (num_sectors == 1440 || num_sectors == 2400 ||
                     num_sectors == 2880 || num_sectors == 5760) ? 12 : 16;
         if (verbose >= 2)
-            printf("Choosing %d bits for FAT\n", size_fat);
+            printf("Choosing %d bits for FAT\n", fat_bits);
 
         /* Atari format: cluster size should be 2, except explicitly requested by
          * the user, since GEMDOS doesn't like other cluster sizes very much.
@@ -1007,26 +1042,26 @@ static void setup_tables(void)
                 reserved_sectors;
 
             /* The factor 2 below avoids cut-off errors for nr_fats == 1 and
-             * size_fat == 12
-             * The "2*nr_fats*size_fat/8" is for the reserved first two FAT entries
+             * fat_bits == 12
+             * The "2*nr_fats*fat_bits/8" is for the reserved first two FAT entries
              */
             clusters =
-                (2 * ((long long)fatdata * sector_size - 2 * nr_fats * size_fat / 8)) /
-                (2 * ((int)bs.sec_per_clus * sector_size + nr_fats * size_fat / 8));
-            sec_per_fat = cdiv((clusters + 2) * size_fat / 8, sector_size);
+                (2 * ((long long)fatdata * sector_size - 2 * nr_fats * fat_bits / 8)) /
+                (2 * ((int)bs.sec_per_clus * sector_size + nr_fats * fat_bits / 8));
+            sec_per_fat = cdiv((clusters + 2) * fat_bits / 8, sector_size);
 
             /* Need to recalculate number of clusters, since the unused parts of the
              * FATS and data area together could make up space for an additional,
              * not really present cluster. */
             clusters = (fatdata - nr_fats * sec_per_fat) / bs.sec_per_clus;
-            maxclust = (sec_per_fat * sector_size * 8) / size_fat;
+            maxclust = (sec_per_fat * sector_size * 8) / fat_bits;
             if (verbose >= 2)
                 printf("ss=%d: #clu=%d, fat_len=%d, maxclu=%d\n",
                         sector_size, clusters, sec_per_fat, maxclust);
 
             /* last 10 cluster numbers are special (except FAT32: 4 high bits rsvd);
              * first two numbers are reserved */
-            if (maxclust <= (size_fat == 32 ? MAX_CLUST_32 : (1 << size_fat) - 0x10) &&
+            if (maxclust <= (fat_bits == 32 ? MAX_CLUST_32 : (1 << fat_bits) - 0x10) &&
                     clusters <= maxclust - 2)
                 break;
 
@@ -1047,7 +1082,7 @@ static void setup_tables(void)
             die( "Would need a sector size > 16k, which GEMDOS can't work with");
 
         cluster_count = clusters;
-        if (size_fat != 32)
+        if (fat_bits != 32)
             bs.sec_per_fat = CT_LE_W(sec_per_fat);
         else {
             bs.sec_per_fat = 0;
@@ -1055,10 +1090,13 @@ static void setup_tables(void)
         }
     }
 
+    fat_size = sec_per_fat * sector_size;
+    fat_start = reserved_sectors * sector_size;
+
     bs.sector_size[0] = (char) (sector_size & 0x00ff);
     bs.sector_size[1] = (char) ((sector_size & 0xff00) >> 8);
 
-    if (size_fat == 32) {
+    if (fat_bits == 32) {
         /* set up additional FAT32 fields */
         bs.fat32.flags = CT_LE_W(0);
         bs.fat32.version[0] = 0;
@@ -1134,13 +1172,13 @@ static void setup_tables(void)
         printf("using 0x%02x media descriptor, with %d sectors;\n",
                 (int)(bs.media), num_sectors);
         printf("file system has %d %d-bit FAT%s and %d sector%s per cluster.\n",
-                (int)(bs.nfats), size_fat, (bs.nfats != 1) ? "s" : "",
+                (int)(bs.nfats), fat_bits, (bs.nfats != 1) ? "s" : "",
                 (int)(bs.sec_per_clus), (bs.sec_per_clus != 1) ? "s" : "");
         printf ("FAT size is %d sector%s, and provides %d cluster%s.\n",
                 sec_per_fat, (sec_per_fat != 1) ? "s" : "",
                 cluster_count, (cluster_count != 1) ? "s" : "");
 
-        if (size_fat != 32)
+        if (fat_bits != 32)
             printf ("Root directory contains %d slots.\n",
                     (int)(bs.dir_entries[0]) + (int)(bs.dir_entries[1]) * 256);
 
@@ -1153,22 +1191,38 @@ static void setup_tables(void)
             printf("no volume label.\n");
     }
 
-    /* Make the file allocation tables! */
-    if ((fat = (unsigned char *)alloc_mem(sec_per_fat * sector_size)) == NULL)
-        die("unable to allocate space for FAT image in memory");
+    if (fat_bits != 32) {
+        /* Make the file allocation tables! */
+        if ((fat = (unsigned char *)alloc_mem(sec_per_fat * sector_size)) == NULL)
+            die("unable to allocate space for FAT image in memory");
 
-    memset(fat, 0, sec_per_fat * sector_size);
+        memset(fat, 0, sec_per_fat * sector_size);
+    }
+    else {
+        int i, j;
 
-    mark_FAT_cluster(0, 0xffffffff);	/* Initial fat entries */
+        if ((fat = (unsigned char *)alloc_mem(sector_size)) == NULL)
+            die("unable to allocate space for FAT image in memory");
+
+        memset(fat, 0, sector_size);
+
+        seekto(reserved_sectors * sector_size, "first FAT");
+        for (i = 1; i <= nr_fats; i++) {
+            for (j = 0; j < sec_per_fat; j++) {
+                writebuf(fat, sector_size, "FAT");
+            }
+        }
+    }
+
+    mark_FAT_cluster(0, 0x00ffffff | bs.media << 24);	/* Initial fat entries */
     mark_FAT_cluster(1, 0xffffffff);
-    fat[0] = (unsigned char)bs.media;	/* Put media type in first byte! */
-    if (size_fat == 32) {
+    if (fat_bits == 32) {
         /* Mark cluster 2 as EOF (used for root dir) */
         mark_FAT_cluster(2, VALUE_FAT_EOF);
     }
 
     /* Make the root directory entries */
-    size_root_dir = (size_fat == 32) ?
+    size_root_dir = (fat_bits == 32) ?
         bs.sec_per_clus * sector_size :
         (((int)bs.dir_entries[1] * 256 + (int)bs.dir_entries[0]) *
          sizeof(struct dir_entry));
@@ -1199,7 +1253,7 @@ static void setup_tables(void)
         de->size = CT_LE_L(0);
     }
 
-    if (size_fat == 32) {
+    if (fat_bits == 32) {
         /* For FAT32, create an fsinfo sector */
         struct fsinfo_sector *info;
 
@@ -1230,36 +1284,13 @@ static void setup_tables(void)
 
 /* Write the new filesystem's data tables to wherever they're going to end up! */
 
-#define error(str)				\
-    do {						\
-        free_mem(fat);					\
-        if (fsinfo)        \
-            free_mem(fsinfo);	\
-        free_mem(root_dir);				\
-        die(str);					\
-    } while (0)
-
-#define seekto(pos,errstr)						\
-    do {									\
-        loff_t __pos = (pos);						\
-        if (llseek(dev, __pos, SEEK_SET) != __pos)				\
-            error("seek to " errstr " failed whilst writing tables");	\
-    } while (0)
-
-#define writebuf(buf, size, errstr)			\
-    do {							\
-        int __size = (size);				\
-        if (write(dev, buf, __size) != __size)		\
-            error("failed whilst writing " errstr);	\
-    } while (0)
-
 
 static void write_tables(void)
 {
     int x;
     int sec_per_fat;
 
-    sec_per_fat = (size_fat == 32) ?
+    sec_per_fat = (fat_bits == 32) ?
         CF_LE_L(bs.fat32.sec_per_fat32) : CF_LE_W(bs.sec_per_fat);
 
     seekto(0, "start of device");
@@ -1273,7 +1304,7 @@ static void write_tables(void)
     writebuf((char *)&bs, sizeof(struct boot_sector), "boot sector");
 
     /* on FAT32, write the info sector and backup boot sector */
-    if (size_fat == 32) {
+    if (fat_bits == 32) {
         seekto(CF_LE_W(bs.fat32.info_sector) * sector_size, "info sector");
         writebuf(fsinfo, 512, "info sector");
 
@@ -1285,9 +1316,11 @@ static void write_tables(void)
     }
 
     /* seek to start of FATS and write them all */
-    seekto(reserved_sectors * sector_size, "first FAT");
-    for (x = 1; x <= nr_fats; x++)
-        writebuf(fat, sec_per_fat * sector_size, "FAT");
+    if (fat_bits != 32) {
+        seekto(reserved_sectors * sector_size, "first FAT");
+        for (x = 1; x <= nr_fats; x++)
+            writebuf(fat, sec_per_fat * sector_size, "FAT");
+    }
 
     /* Write the root directory directly after the last FAT. This is the root
      * dir area on FAT12/16, and the first cluster on FAT32. */
@@ -1297,7 +1330,7 @@ static void write_tables(void)
         /* dupe template into reserved sectors */
         seekto(0, "Start of partition");
 
-        if (size_fat == 32) {
+        if (fat_bits == 32) {
             writebuf(template_boot_code, 3, "backup jmpBoot");
             seekto(0x5a, "sector 1 boot area");
             writebuf(template_boot_code + 0x5a, 420, "sector 1 boot area");
@@ -1406,9 +1439,9 @@ int main(int argc, char **argv)
                 }
                 break;
             case 'F':		/* F : Choose FAT size */
-                size_fat = (int)strtol(optarg, &tmp, 0);
+                fat_bits = (int)strtol(optarg, &tmp, 0);
                 if (*tmp ||
-                        (size_fat != 12 && size_fat != 16 && size_fat != 32)) {
+                        (fat_bits != 12 && fat_bits != 16 && fat_bits != 32)) {
                     printf("Bad FAT type : %s\n", optarg);
                     usage();
                 }
@@ -1699,6 +1732,7 @@ int main(int argc, char **argv)
     else if (listfile)
         get_list_blocks(listfile);
 
+    print_mem();
     write_tables();		/* Write the file system tables away! */
 
     exit(0);			/* Terminate with no errors! */
