@@ -162,8 +162,12 @@ static void __traverse_dir(DOS_FS *fs, uint32_t clus_num)
     dump_area(clus_offset, fs->cluster_size, buf_clus);
 
     while (clus_num > 0 && clus_num != -1) {
-        llseek(fd_in, clus_offset + offset, SEEK_SET);
-        read(fd_in, &de, sizeof(DIR_ENT));
+        if (llseek(fd_in, clus_offset + offset, SEEK_SET) !=
+                clus_offset + offset)
+            pdie("Seek to %lld of input", clus_offset + offset);
+
+        if (read(fd_in, &de, sizeof(DIR_ENT)) < 0)
+            pdie("Read %d bytes at %lld", sizeof(DIR_ENT), clus_offset);
 
         offset += sizeof(DIR_ENT);
         if (!(offset % fs->cluster_size)) {
@@ -234,8 +238,16 @@ static void dump_data(DOS_FS *fs)
         dump_area(clus_offset, fs->cluster_size, buf_clus);
 
         for (i = 0; i < fs->root_entries; i++) {
-            llseek(fd_in, clus_offset + i * sizeof(DIR_ENT), SEEK_SET);
-            read(fd_in, &de, sizeof(DIR_ENT));
+            if (llseek(fd_in, clus_offset + i * sizeof(DIR_ENT), SEEK_SET) !=
+                    clus_offset + i * sizeof(DIR_ENT)) {
+                pdie("Seek to %lld of input",
+                        clus_offset + i * sizeof(DIR_ENT));
+            }
+
+            if (read(fd_in, &de, sizeof(DIR_ENT)) < 0) {
+                pdie("Read %d bytes at %lld", sizeof(DIR_ENT),
+                        clus_offset + i * sizeof(DIR_ENT));
+            }
 
             if (IS_FREE(de.name) || IS_LFN_ENT(de.attr) ||
                     IS_VOLUME_LABEL(de.attr) ||
@@ -270,8 +282,11 @@ void __read_fat_dump(DOS_FS *fs)
         fat_offset = fs->fat_start + fs->fat_size * fat_num;
     }
 
-    llseek(fd_in, fat_offset, SEEK_SET);
-    read(fd_in, fat, size);
+    if (llseek(fd_in, fat_offset, SEEK_SET) != fat_offset)
+        pdie("Seek to %lld of input", fat_offset);
+
+    if (read(fd_in, fat, size) < 0)
+        pdie("Read %d bytes at %lld", size, fat_offset);
 
     fs->fat = alloc_mem(sizeof(FAT_ENTRY) * (fs->clusters + 2ULL));
 
@@ -297,13 +312,19 @@ static void dump_fats(DOS_FS *fs)
 {
     int i, j;
 
-    llseek(fd_in, fs->fat_start, SEEK_SET);
-    llseek(fd_out, fs->fat_start, SEEK_SET);
+    if (llseek(fd_in, fs->fat_start, SEEK_SET) != fs->fat_start)
+        pdie("Seek to %lld of input", fs->fat_start);
+
+    if (llseek(fd_out, fs->fat_start, SEEK_SET) != fs->fat_start)
+        pdie("Seek to %lld of input", fs->fat_start);
 
     for (i = 0; i < fs->nfats; i++) {
         for (j = 0; j < sec_per_fat; j++) {
-            read(fd_in, buf_sec, sector_size);
-            write(fd_out, buf_sec, sector_size);
+            if (read(fd_in, buf_sec, sector_size) < 0)
+                pdie("Read FAT");
+
+            if (write(fd_out, buf_sec, sector_size) < 0)
+                pdie("Write FAT");
         }
     }
 
@@ -314,12 +335,18 @@ static void dump_reserved(DOS_FS *fs)
 {
     int i;
 
-    llseek(fd_in, 0, SEEK_SET);
-    llseek(fd_out, 0, SEEK_SET);
+    if (llseek(fd_in, 0, SEEK_SET) != 0)
+        pdie("Seek to %lld of input", 0);
+
+    if (llseek(fd_out, 0, SEEK_SET) != 0)
+        pdie("Seek to %lld of input", 0);
 
     for (i = 0; i < reserved_cnt; i++) {
-        read(fd_in, buf_sec, sector_size);
-        write(fd_out, buf_sec, sector_size);
+        if (read(fd_in, buf_sec, sector_size) < 0)
+            pdie("Read reserved sector");
+
+        if (write(fd_out, buf_sec, sector_size) < 0)
+            pdie("Write reserved sector");
     }
 }
 
@@ -335,8 +362,11 @@ static int read_boot_dump(DOS_FS *fs, struct boot_sector *b)
     int change_flag = 0;
 
     /* read boot_sector */
-    llseek(fd_in, 0, SEEK_SET);
-    read(fd_in, b, sizeof(struct boot_sector));
+    if (llseek(fd_in, 0, SEEK_SET) != 0)
+        pdie("Seek to %lld of input", 0);
+
+    if (read(fd_in, b, sizeof(struct boot_sector)) < 0)
+        pdie("Read %d bytes at %lld", sizeof(struct boot_sector), 0);
 
     reserved_cnt = CF_LE_W(b->reserved_cnt);
     sector_size = GET_UNALIGNED_W(b->sector_size);
