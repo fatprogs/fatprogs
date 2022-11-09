@@ -106,5 +106,6 @@ int main(int argc, char *argv[])
     }
 
     write_label(&fs, label);
+    clean_boot(&fs);
     return fs_close(rw) ? 1 : 0;
 }

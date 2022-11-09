@@ -383,6 +383,12 @@ void read_boot(DOS_FS *fs)
     if (verbose) dump_boot(fs,&b,logical_sector_size);
 }
 
+void clean_boot(DOS_FS *fs)
+{
+    if (fs->label)
+        free(fs->label);
+}
+
 void write_label(DOS_FS *fs, char *label)
 {
     struct boot_sector b;

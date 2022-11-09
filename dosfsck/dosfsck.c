@@ -79,12 +79,6 @@ static void check_atari( void )
 #endif
 }
 
-static void clean_fs(DOS_FS *fs)
-{
-    if (fs->label)
-        free(fs->label);
-}
-
 int main(int argc,char **argv)
 {
     DOS_FS fs;
@@ -180,7 +174,7 @@ int main(int argc,char **argv)
     printf("%s: %u files, %u/%u clusters\n", argv[optind], n_files,
             fs.clusters - free_clusters, fs.clusters);
 
-    clean_fs(&fs);
+    clean_boot(&fs);
     return fs_close(rw) ? 1 : 0;
 }
 
