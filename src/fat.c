@@ -20,6 +20,7 @@
 #include "file.h"
 
 uint32_t alloc_clusters;
+uint32_t bad_clusters;
 
 int __check_file_owner(DOS_FS *fs, uint32_t start, uint32_t cluster, int cnt);
 void set_exclusive_bitmap(DOS_FS *fs)
@@ -191,7 +192,14 @@ void read_fat(DOS_FS *fs)
                 continue;
             }
 
-            /* TODO: handling in case that clus_num is bad cluster */
+            /* skip setting bitmap of bad cluster */
+            if (FAT_IS_BAD(fs, clus_num)) {
+                bad_clusters++;
+                if ((total_cluster + i) == FAT_START_ENT) {
+                    die("Root cluster's next is bad cluster!\n");
+                }
+                continue;
+            }
 
             /* set bitmap only valid cluster */
             set_bit(total_cluster + i, fs->bitmap);
@@ -493,7 +501,7 @@ void fix_bad(DOS_FS *fs)
 
     for (i = FAT_START_ENT; i < max_clus_num; i++) {
         if (test_bit(i, fs->real_bitmap)) {
-            /* TODO: check 64bit at once */
+            /* check 64bit at once */
             if (fs->real_bitmap[i / BITS_PER_LONG] == 0xffffffff) {
                 i = ((i / BITS_PER_LONG) * BITS_PER_LONG) + BITS_PER_LONG - 1;
             }
@@ -557,22 +565,27 @@ static void find_start_clusters(DOS_FS *fs)
 
     for (i = FAT_START_ENT; i < max_clus_num; i++) {
         if (!test_bit(i, fs->real_bitmap)) {
-            /* TODO: check 64bit at once */
+            /* check 64bit at once */
             if (fs->real_bitmap[i / BITS_PER_LONG] == 0) {
                 i = ((i / BITS_PER_LONG) * BITS_PER_LONG) + BITS_PER_LONG - 1;
             }
             continue;
         }
 
-        get_fat(fs, i, &next_clus);
+        next_clus = __next_cluster(fs, i);
         if (next_clus && !FAT_IS_BAD(fs, next_clus)) {
             prev = i;
             cnt = 1;
-            for (walk = next_cluster(fs, i); walk > 0 && walk != -1;
-                    walk = next_cluster(fs, walk)) {
+            for (walk = next_clus; walk > 0 && walk != -1;
+                    walk = __next_cluster(fs, walk)) {
 
                 /* broke self cycle case */
                 if (prev == walk) {
+                    set_fat(fs, prev, -1);
+                    break;
+                }
+
+                if (FAT_IS_BAD(fs, walk)) {
                     set_fat(fs, prev, -1);
                     break;
                 }
@@ -625,8 +638,8 @@ void reclaim_file(DOS_FS *fs)
             continue;
         }
 
-        get_fat(fs, i, &next);
-        if (next && next < max_clus_num) {
+        next = __next_cluster(fs, i);
+        if (next > 0 && next < max_clus_num) {
             get_fat(fs, next, &value);
             /* In case that i's next cluster is already in other cluster chain
              * or i's next cluster has wrong cluster value */
@@ -714,6 +727,7 @@ uint32_t update_free(DOS_FS *fs)
 #if 0 //DEBUG
     uint32_t i;
     uint32_t next;
+    int bad_cnt = 0;
     int temp_cnt = 0;
 
     /* TODO: to improve performance like as read_fat() */
@@ -722,13 +736,16 @@ uint32_t update_free(DOS_FS *fs)
         if (!next) {
             ++free;
         }
+        else if (FAT_IS_BAD(fs, next))
+            bad_cnt++;
         else
             temp_cnt++;
     }
-    printf("Calculated free %d, allocated clusters %d\n", free, temp_cnt);
+    printf("Calculated free %d, allocated clusters %d, bad clusters %d\n",
+            free, temp_cnt, bad_cnt);
 #endif
 
-    free = fs->clusters - alloc_clusters;
+    free = fs->clusters - alloc_clusters - bad_clusters;
 
     if (!fs->fsinfo_start)
         return free;
@@ -736,8 +753,9 @@ uint32_t update_free(DOS_FS *fs)
     if (verbose) {
         printf("Checking free cluster summary.\n");
 
-        printf("Total clusters: %d, Allocated clusters: %d, Free clusters: %d\n",
-                fs->clusters, alloc_clusters, fs->clusters - alloc_clusters);
+        printf("Total clusters: %d, Allocated clusters: %d, Free clusters: %d "
+                "Bad clusters: %d\n",
+                fs->clusters, alloc_clusters, free, bad_clusters);
     }
 
     if (fs->free_clusters >= 0) {

@@ -875,8 +875,6 @@ static int check_files(DOS_FS *fs, DOS_FILE *start)
  *
  * check bad name of sibling entires,
  * check duplicate entries,
- * check '.', '..' entries that is not directory
- * check '.', '..' entires missing (not support yet)
  */
 static int check_dir(DOS_FS *fs, DOS_FILE **root, int dots)
 {
@@ -1044,7 +1042,7 @@ static void check_file_chain(DOS_FS *fs, DOS_FILE *file, int read_test)
     for (curr = FSTART(file, fs);
             curr > 0 && curr < max_clus_num; curr = next) {
 
-        next = next_cluster(fs, curr);
+        next = __next_cluster(fs, curr);
 
         /* check if bit of curr is set in fs->real_bitmap */
         if (test_bit(curr, fs->real_bitmap)) {
@@ -1063,8 +1061,18 @@ static void check_file_chain(DOS_FS *fs, DOS_FILE *file, int read_test)
             break;
         }
 
-        if (FAT_IS_BAD(fs, next))
+        /* check if next cluster is bad */
+        if (FAT_IS_BAD(fs, next)) {
+            printf("%s\n Bad cluster found. "
+                    "Truncating to %u cluster%s.\n",
+                    path_name(file), clusters, clusters == 1 ? "" : "s");
+            if (prev)
+                set_fat(fs, prev, -1);
+            else
+                MODIFY_START(file, 0, fs);
+
             break;
+        }
 
         if (!read_test) {
             /* keep cluster curr */
