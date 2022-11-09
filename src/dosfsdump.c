@@ -32,8 +32,12 @@ typedef enum dflag {
 
 extern int errno;
 
+DOS_FS fs;
 int fd_in;
 int fd_out;
+int fd_out_stdout = 0;
+loff_t stdout_offset = (off_t)-1;
+
 int verbose = 0;
 int fat_num = 0;
 int atari_format = 0;
@@ -46,8 +50,74 @@ uint32_t max_clus_num;  /* Not used, for removing compile error */
 char *buf_clus = NULL;
 char *buf_sec = NULL;
 char outfile[256];
+char *write_bitmap = NULL;
 
 static void traverse_tree(DOS_FS *fs, uint32_t clus_num, int attr);
+
+static inline int bitmap_get(char *bitmap, unsigned int i)
+{
+    unsigned int index, offset;
+
+    index = i / BITS_PER_BYTE;
+    offset = i % BITS_PER_BYTE;
+    return (bitmap[index] & (1 << offset)) ? 1 : 0;
+}
+
+static inline void bitmap_set(char *bitmap, unsigned int i)
+{
+    unsigned int index, offset;
+
+    index = i / BITS_PER_BYTE;
+    offset = i % BITS_PER_BYTE;
+    bitmap[index] |= (1 << offset);
+}
+
+static int bitmap_set_range(char *bitmap, unsigned int s, unsigned int e)
+{
+    if (s > e)
+        return -EINVAL;
+
+    while (s <= e) {
+        bitmap_set(bitmap, s);
+        s++;
+    }
+    return 0;
+}
+
+static int bitmap_find_next_one(char *bitmap,
+        unsigned int s, unsigned int e_excl,
+        unsigned int *next)
+{
+    if (s >= e_excl)
+        return -EINVAL;
+
+    while (s < e_excl) {
+        if (bitmap_get(bitmap, s)) {
+            *next = s;
+            return 0;
+        }
+        s++;
+    }
+    return 1;
+}
+
+static void zero_out_region_stdout(off_t end_excl)
+{
+    size_t len;
+
+    if (end_excl <= stdout_offset)
+        return;
+
+    memset(buf_sec, 0, sector_size);
+    while (stdout_offset < end_excl) {
+        len = (size_t)(end_excl - stdout_offset);
+        if (len > sector_size)
+            len = sector_size;
+        if (write(fd_out, buf_sec, len) != (ssize_t)len)
+            pdie("zero out region(%d,%s)", __LINE__, __func__);
+        stdout_offset += (off_t)len;
+    }
+}
 
 /* same function for dosfsdump */
 static inline void dump__get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value)
@@ -96,7 +166,6 @@ static inline void dump__get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value)
         default:
             die("Bad FAT entry size: %d bits.", fs->fat_bits);
     }
-
 }
 
 static inline loff_t dump__cluster_start(DOS_FS *fs, uint32_t clus_num)
@@ -115,11 +184,18 @@ static inline uint32_t dump__next_cluster(DOS_FS *fs, uint32_t clus_num)
     else
         return FAT_IS_EOF(fs, value) ? -1 : value;
 }
-/**/
 
 static void dump_area(loff_t pos, int size, void *data)
 {
     int ret = 0;
+
+    if (fd_out_stdout) {
+        unsigned int s, e;
+        s = (pos - fs.root_start) / fs.cluster_size;
+        e = (pos + size - 1 - fs.root_start) / fs.cluster_size;
+        bitmap_set_range(write_bitmap, s, e);
+        return;
+    }
 
     if ((ret = pread(fd_in, data, size, pos)) < 0)
         pdie("Read %d bytes at %lld", size, pos);
@@ -300,6 +376,57 @@ static void dump_data(DOS_FS *fs)
     }
 }
 
+static void dump_cluster_stdout(unsigned int clu)
+{
+    off_t src_offset;
+
+    src_offset = fs.root_start + (off_t)clu * fs.cluster_size;
+
+    if (pread(fd_in, buf_clus, fs.cluster_size, src_offset) !=
+            (ssize_t)fs.cluster_size)
+        pdie("Read %u bytes at %lld(%d,%s)", fs.cluster_size,
+                src_offset , __LINE__, __func__);
+    if (write(fd_out, buf_clus, fs.cluster_size) !=
+            (ssize_t)fs.cluster_size)
+        pdie("Write %u bytes at %lld(%d,%s)", fs.cluster_size,
+                src_offset , __LINE__, __func__);
+}
+
+static void dump_data_stdout(DOS_FS *fs)
+{
+    unsigned int i, next_i= 0, last_i;
+    char *buf_zero_clus;
+
+    buf_zero_clus = alloc_mem(fs->cluster_size);
+    zero_out_region_stdout(fs->root_start);
+
+    i = 0;
+    last_i = fs->bitmap_size * 8;
+    while (i < last_i) {
+        /* read clusters and write these for allocated clusters */
+        while (i < last_i && bitmap_get(write_bitmap, i)) {
+            dump_cluster_stdout(i);
+            i++;
+        }
+
+        /* not write zeroes if all of remaining clusters are free */
+        if (bitmap_find_next_one(write_bitmap,
+                    i, last_i, &next_i))
+            break;
+
+        /* write zeroes for the free clusters */
+        while (i < next_i) {
+            if (write(fd_out, buf_zero_clus, fs->cluster_size) !=
+                    (ssize_t)fs->cluster_size)
+                pdie("Write %u bytes (%d,%s)", fs->cluster_size,
+                        __LINE__, __func__);
+            i++;
+        }
+    }
+
+    free(buf_zero_clus);
+}
+
 /* It's for dosfsdump, read just one fat 1st or selected. */
 static void dump__read_fat(DOS_FS *fs)
 {
@@ -376,8 +503,13 @@ static void dump_fats(DOS_FS *fs)
     if (lseek(fd_in, fs->fat_start, SEEK_SET) != fs->fat_start)
         pdie("Seek to %lld of input(%d,%s)", fs->fat_start, __LINE__, __func__);
 
-    if (lseek(fd_out, fs->fat_start, SEEK_SET) != fs->fat_start)
-        pdie("Seek to %lld of input(%d,%s)", fs->fat_start, __LINE__, __func__);
+    if (fd_out_stdout == 0) {
+        if (lseek(fd_out, fs->fat_start, SEEK_SET) != fs->fat_start)
+            pdie("Seek to %lld of input(%d,%s)", fs->fat_start, __LINE__, __func__);
+    } else {
+        zero_out_region_stdout(fs->fat_start);
+        stdout_offset = fs->fat_start;
+    }
 
     for (i = 0; i < fs->nfats; i++) {
         for (j = 0; j < sec_per_fat; j++) {
@@ -386,6 +518,8 @@ static void dump_fats(DOS_FS *fs)
 
             if (write(fd_out, buf_sec, sector_size) < 0)
                 pdie("Write FAT(%d,%s)", __LINE__, __func__);
+
+            stdout_offset += sector_size;
         }
     }
 
@@ -399,8 +533,13 @@ static void dump_reserved(DOS_FS *fs)
     if (lseek(fd_in, 0, SEEK_SET) != 0)
         pdie("Seek to %lld of input(%d,%s)", 0, __LINE__, __func__);
 
-    if (lseek(fd_out, 0, SEEK_SET) != 0)
-        pdie("Seek to %lld of input(%d,%s)", 0, __LINE__, __func__);
+    if (fd_out_stdout == 0) {
+        if (lseek(fd_out, 0, SEEK_SET) != 0)
+            pdie("Seek to %lld of input(%d,%s)", 0, __LINE__, __func__);
+    } else {
+        if (stdout_offset != 0)
+            pdie("Seek to %lld of input(%d,%s)", 0, __LINE__, __func__);
+    }
 
     for (i = 0; i < reserved_cnt; i++) {
         if (read(fd_in, buf_sec, sector_size) < 0)
@@ -409,6 +548,8 @@ static void dump_reserved(DOS_FS *fs)
         if (write(fd_out, buf_sec, sector_size) < 0)
             pdie("Write reserved sector(%d,%s)", __LINE__, __func__);
     }
+
+    stdout_offset = (off_t)(sector_size * i);
 }
 
 static inline int is_valid_media(unsigned char media)
@@ -446,12 +587,13 @@ static int dump__read_boot(DOS_FS *fs, struct boot_sector *b)
         exit(-1);
     }
 
-    if (lseek(fd_out, device_size, SEEK_SET) != device_size) {
+    if (fd_out_stdout == 0 &&
+            lseek(fd_out, device_size, SEEK_SET) != device_size) {
         fprintf(stderr, "lseek error (%s)\n", strerror(errno));
         exit(-1);
     }
 
-    if (write(fd_out, "0", 1) < 0) {
+    if (fd_out_stdout == 0 && write(fd_out, "0", 1) < 0) {
         fprintf(stderr, "write error (%s)\n", strerror(errno));
         exit(-1);
     };
@@ -482,7 +624,6 @@ static int dump__read_boot(DOS_FS *fs, struct boot_sector *b)
     }
 
     fs->cluster_size = b->sec_per_clus * sector_size;
-
 retry:
     if (!fs->cluster_size) {
         /* Can't dump all blocks, just dump reserved sectors only */
@@ -615,7 +756,6 @@ void clean_dump(DOS_FS *fs)
 
 int main(int argc, char *argv[])
 {
-    DOS_FS fs;
     struct boot_sector b;
     int c;
     int ret = 0;
@@ -638,6 +778,10 @@ int main(int argc, char *argv[])
                     exit(EXIT_SYNTAX_ERROR);
                 }
                 memcpy(outfile, optarg, strlen(optarg));
+                if (strcmp(outfile, "-") == 0) {
+                    fd_out_stdout = 1;
+                    stdout_offset = 0;
+                }
                 break;
             case 'v':
                 verbose = 1;
@@ -666,10 +810,18 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    fd_out = open(outfile, O_RDWR | O_CREAT | O_TRUNC, 0666);
-    if (fd_out < 0) {
-        fprintf(stderr, "Can't open output file('%s')\n", outfile);
-        exit(EXIT_FAILURE);
+    if (fd_out_stdout == 0) {
+        fd_out = open(outfile, O_RDWR | O_CREAT | O_TRUNC, 0666);
+        if (fd_out < 0) {
+            fprintf(stderr, "Can't open output file('%s')\n", outfile);
+            exit(EXIT_FAILURE);
+        }
+    } else {
+        fd_out = fileno(stdout);
+        if (fd_out < 0) {
+            fprintf(stderr, "Can't open output file('%s')\n", outfile);
+            exit(EXIT_FAILURE);
+        }
     }
 
     ret = dump__read_boot(&fs, &b);
@@ -693,8 +845,6 @@ int main(int argc, char *argv[])
 
     dump_fats(&fs);
 
-    free_mem(buf_sec);
-
     if (dump_flag <= DUMP_FAT) {
         fprintf(stderr, "Dump reserved sectors and FATs only!\n");
         exit(EXIT_SUCCESS);
@@ -706,16 +856,26 @@ int main(int argc, char *argv[])
         die("Memory allocation failed(%s,%d)", __func__, __LINE__);
     }
 
+    write_bitmap = alloc_mem(fs.bitmap_size);
+
     dump_data(&fs);
+    if (fd_out_stdout)
+        dump_data_stdout(&fs);
+
     if (dump_flag == DUMP_ALL) {
         dump_orphaned(&fs);
     }
 
+    free_mem(buf_sec);
     free_mem(buf_clus);
+    free_mem(write_bitmap);
 
     clean_dump(&fs);
 
     close(fd_in);
-    close(fd_out);
+    if (fd_out_stdout == 0) {
+        fsync(fd_out);
+        close(fd_out);
+    }
     fprintf(stderr, "Done: dump \"%s\" to \"%s\"\n", argv[optind], outfile);
 }
