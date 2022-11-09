@@ -148,6 +148,7 @@ void lfn_add_slot(DIR_ENT *de, loff_t dir_offset)
 {
     LFN_ENT *lfn = (LFN_ENT *)de;
     int slot = lfn->id & LFN_ID_SLOTMASK;
+    int skip = 0;
     unsigned offset;
 
     if (lfn_slot == 0)
@@ -198,19 +199,21 @@ void lfn_add_slot(DIR_ENT *de, loff_t dir_offset)
                         lfn_reset();
                         break;
                     case '3':
-                        /* TODO: modify lfn_slot to concatenated LFN slots ?? */
                         lfn->id &= ~LFN_ID_START;
                         fs_write(dir_offset + offsetof(LFN_ENT, id),
                                 sizeof(lfn->id), &lfn->id);
+                        skip = 1;
                         break;
                 }
             }
         }
-        lfn_slot = slot;
-        lfn_checksum = lfn->alias_checksum;
-        lfn_unicode = alloc((lfn_slot * CHARS_PER_LFN + 1) * 2);
-        lfn_offsets = alloc(lfn_slot * sizeof(loff_t));
-        lfn_parts = 0;
+        if (!skip) {
+            lfn_slot = slot;
+            lfn_checksum = lfn->alias_checksum;
+            lfn_unicode = alloc((lfn_slot * CHARS_PER_LFN + 1) * 2);
+            lfn_offsets = alloc(lfn_slot * sizeof(loff_t));
+            lfn_parts = 0;
+        }
     }
     else if (lfn_slot == -1 && slot != 0) {
         /* No LFN in progress, but slot found; start bit missing */
