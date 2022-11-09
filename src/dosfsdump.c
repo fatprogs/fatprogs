@@ -400,6 +400,22 @@ static void dump_reserved(DOS_FS *fs)
     }
 }
 
+static inline int is_valid_media(unsigned char media)
+{
+    return 0xf8 <= media || media == 0xf0;
+}
+
+static int is_valid_fat(DOS_FS *fs, struct boot_sector *b)
+{
+    unsigned short reserved_sector;
+
+    reserved_sector = CF_LE_W(b->reserved_cnt);
+    if (!reserved_sector || !b->nfats || !is_valid_media(b->media))
+        return 0;
+
+    return 1;
+}
+
 static int dump__read_boot(DOS_FS *fs, struct boot_sector *b)
 {
     unsigned int total_sectors;
@@ -408,13 +424,31 @@ static int dump__read_boot(DOS_FS *fs, struct boot_sector *b)
     unsigned long long num_clusters;
     off_t data_size;
     off_t last_offset;
+    off_t device_size;
     int ret = 0;
     int change_flag = 0;
+
+    /* read device size */
+    device_size = lseek(fd_in, 0, SEEK_END);
+    if (lseek(fd_out, device_size, SEEK_SET) != device_size)
+        exit(-1);
+
+    write(fd_out, "0", 1);
 
     /* read boot_sector */
     if (pread(fd_in, b, sizeof(struct boot_sector), 0) < 0)
         pdie("Read %d bytes at %lld(%d,%s)",
                 sizeof(struct boot_sector), 0, __LINE__, __func__);
+
+    if (!is_valid_fat(fs, b)) {
+        printf("Device(or file) is not valid FAT filesystem\n");
+        exit(-1);
+    }
+
+    if (b->boot_sign != CT_LE_W(BOOT_SIGN)) {
+        printf("Filesystem does not have FAT32 magic number(0x%d)\n", CF_LE_W(b->boot_sign));
+        exit(-1);
+    }
 
     reserved_cnt = CF_LE_W(b->reserved_cnt);
     sector_size = GET_UNALIGNED_W(b->sector_size);
