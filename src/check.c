@@ -2254,6 +2254,8 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
             MODIFY_START(dot_file, start_clus, fs);
         }
 
+#if 0   // Windows does not check time field. So comment out below codes.
+
         if (memcmp(&p_de->ctime_ms, &de->ctime_ms, 7) ||
                     memcmp(&p_de->time, &de->time, 4)) {
             /* copy ctime_ms, ctime, cdate, adate, time, date from self */
@@ -2271,6 +2273,7 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
             fs_write(dot_file->offset + offsetof(DIR_ENT, time),
                     sizeof(de->time) + sizeof(de->date), &de->time);
         }
+#endif
         return 0;
     }
 
