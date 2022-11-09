@@ -102,6 +102,17 @@ static void dump_boot(DOS_FS *fs, struct boot_sector *b, unsigned lss)
     printf("==========================================================\n");
 }
 
+/* check if there is difference of boot dirty flag
+ * between boot and backup boot sector
+ *
+ * return 1 : if boot and backup boot sector is same except boot flag.
+ * return 0 : if not. */
+static int check_boot_flag(struct boot_sector *b, struct boot_sector *b2)
+{
+    b2->fat32.vi.state = b->fat32.vi.state;
+    return !memcmp(b, b2, sizeof(struct boot_sector));
+}
+
 static void check_backup_boot(DOS_FS *fs, struct boot_sector *b, int lss)
 {
     struct boot_sector b2;
@@ -141,17 +152,22 @@ static void check_backup_boot(DOS_FS *fs, struct boot_sector *b, int lss)
         else return;
     }
 
-    fs_read(fs->backupboot_start,sizeof(b2),&b2);
-    if (memcmp(b,&b2,sizeof(b2)) != 0) {
+    fs_read(fs->backupboot_start, sizeof(b2), &b2);
+    if (memcmp(b, &b2, sizeof(b2)) != 0) {
         /* there are any differences */
         __u8 *p, *q;
         int i, pos, first = 1;
         char buf[20];
 
+        /* check if there is only difference of boot flag */
+        if (check_boot_flag(b, &b2)) {
+            return;
+        }
+
         printf( "There are differences between boot sector and its backup.\n" );
         printf( "Differences: (offset:original/backup)\n  " );
         pos = 2;
-        for(p = (__u8 *)b, q = (__u8 *)&b2, i = 0;
+        for (p = (__u8 *)b, q = (__u8 *)&b2, i = 0;
                 i < sizeof(b2);
                 ++p, ++q, ++i) {
 
@@ -175,7 +191,6 @@ static void check_backup_boot(DOS_FS *fs, struct boot_sector *b, int lss)
                     "3) No action\n");
         else {
             printf("  Not automatically fixing this.\n");
-            remain_dirty = 1;
         }
 
         switch (interactive ? get_key("123", "?") : '3') {
