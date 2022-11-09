@@ -674,6 +674,13 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
 
     }
 
+    if (IS_VOLUME_LABEL(file->dir_ent.attr) && FSTART(file, fs) != 0) {
+        printf("%s\n  Volume label has start cluster. Fix it to 0\n",
+                path_name(file));
+        MODIFY_START(file, 0, fs);
+        return 0;
+    }
+
     if (FSTART(file, fs) >= max_clus_num) {
         if (IS_DIR(file->dir_ent.attr)) {
             printf("%s\n  Directory start cluster beyond limit (%u > %u). "
@@ -697,7 +704,8 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
     /* TODO: calling once instead of calling next_cluster() / get_fat() */
     for (curr = FSTART(file, fs) ? FSTART(file, fs) : -1;
             curr != -1; curr = next_clus) {
-        next_clus = next_cluster(fs, curr);
+
+        next_clus = __next_cluster(fs, curr);
         if (!next_clus || FAT_IS_BAD(fs, next_clus) ||
                 (next_clus != -1 && next_clus >= max_clus_num)) {
             printf("%s\n  Contains a %s cluster (%u). Assuming EOF.\n",
@@ -723,14 +731,7 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
                     CF_LE_L(file->dir_ent.size),
                     (unsigned long long)clusters * fs->cluster_size,
                     CF_LE_L(file->dir_ent.size));
-            /*
-             * TODO: check if it is need to call truncate()?
-             * calling truncate() takes more time and
-             * it seems not to affect fsck overall result
-             * truncate_file(fs, file, clusters);
-             */
-            MODIFY(file, size,
-                    CT_LE_L((unsigned long long)clusters * fs->cluster_size));
+            /* Do not truncate file, so data can be reclaimed as possible.*/
             if (prev)
                 set_fat(fs, prev, -1);
             else

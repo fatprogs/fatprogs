@@ -45,6 +45,11 @@ int bad_cluster(DOS_FS *fs, uint32_t cluster);
    cluster. */
 uint32_t next_cluster(DOS_FS *fs, uint32_t cluster);
 
+/* same as next_cluster except that next_cluster exit when next cluster is bad,
+ * this function does not exit even if next cluster is bad,
+ * just return bad value */
+uint32_t __next_cluster(DOS_FS *fs, uint32_t cluster);
+
 /* Returns the byte offset of CLUSTER, relative to the respective device. */
 loff_t cluster_start(DOS_FS *fs, uint32_t cluster);
 

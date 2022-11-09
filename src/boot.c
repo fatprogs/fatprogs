@@ -296,8 +296,13 @@ void read_boot(DOS_FS *fs)
     struct volume_info *vi;
 
     fs_read(0, sizeof(b), &b);
-    logical_sector_size = GET_UNALIGNED_W(b.sector_size);
 
+    if (b.boot_sign != CT_LE_W(BOOT_SIGN)) {
+        printf("Filesystem does not have FAT32 magic number(0x%d)\n", CF_LE_W(b.boot_sign));
+        exit(EXIT_NOT_SUPPORT);
+    }
+
+    logical_sector_size = GET_UNALIGNED_W(b.sector_size);
     if (!logical_sector_size) {
         die("Logical sector size is zero.");
     }

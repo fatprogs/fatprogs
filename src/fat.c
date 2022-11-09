@@ -414,16 +414,24 @@ int bad_cluster(DOS_FS *fs, uint32_t cluster)
     return FAT_IS_BAD(fs, value);
 }
 
-uint32_t next_cluster(DOS_FS *fs, uint32_t cluster)
+inline uint32_t __next_cluster(DOS_FS *fs, uint32_t cluster)
 {
     uint32_t next_clus;
 
     get_fat(fs, cluster, &next_clus);
+    return FAT_IS_EOF(fs, next_clus) ? -1 : next_clus;
+}
+
+uint32_t next_cluster(DOS_FS *fs, uint32_t cluster)
+{
+    uint32_t next_clus;
+
+    next_clus = __next_cluster(fs, cluster);
 
     if (FAT_IS_BAD(fs, next_clus))
         die("Internal error: next_cluster on bad cluster");
 
-    return FAT_IS_EOF(fs, next_clus) ? -1 : next_clus;
+    return next_clus;
 }
 
 loff_t cluster_start(DOS_FS *fs, uint32_t cluster)

@@ -108,7 +108,6 @@ int main(int argc, char **argv)
                 break;
             case 'v':
                 verbose = 1;
-                printf("dosfsck " VERSION " (" VERSION_DATE ")\n");
                 break;
             case 'V':
                 verify = 1;
@@ -144,12 +143,14 @@ int main(int argc, char **argv)
                 ((fs.fat_bits == 32) || (fs.fat_bits == 16))) {
             if (check_dirty_flag(&fs)) {
                 if (check_dirty_only) {
-                    printf("  Just check filesystem dirty flag, exit!\n");
+                    if (verify)
+                        printf("  Just check filesystem dirty flag, exit!\n");
                     exit(4);
                 }
             }
             else {
-                printf("  Filesystem dirty flag is clean. exit!\n");
+                if (verify)
+                    printf("  Filesystem dirty flag is clean. exit!\n");
                 exit(0);
             }
         }
@@ -209,15 +210,16 @@ int main(int argc, char **argv)
             fs.clusters - free_clusters, fs.clusters);
 
     clean_boot(&fs);
-    if (fs.fat_cache.addr) {
-        fs_munmap(fs.fat_cache.addr, FAT_CACHE_SIZE);
-    }
 
     /* sync for modified data */
     ret = fs_flush(rw);
 
     if (!remain_dirty)
         clean_dirty_flag(&fs);
+
+    if (fs.fat_cache.addr) {
+        fs_munmap(fs.fat_cache.addr, FAT_CACHE_SIZE);
+    }
 
     /* sync for dirty flag */
     fs_flush(rw);
