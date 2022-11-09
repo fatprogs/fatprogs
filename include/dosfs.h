@@ -59,9 +59,13 @@
 #define VFAT_LN_ATTR (ATTR_RO | ATTR_HIDDEN | ATTR_SYS | ATTR_VOLUME)
 #define VFAT_LN_ATTR_MASK \
     (ATTR_RO | ATTR_HIDDEN | ATTR_SYS | ATTR_VOLUME | ATTR_DIR | ATTR_ARCH)
+#define VFAT_ATTR_MASK  (ATTR_DIR | ATTR_VOLUME)
 
-#define IS_LFN_ENT(attr) (((attr) & VFAT_LN_ATTR_MASK) == VFAT_LN_ATTR)
-#define IS_VOLUME_LABEL(attr) ((attr) & ATTR_VOLUME)
+/* define attribute check macro according to FAT specification document */
+#define IS_LFN_ENT(attr)    (((attr) & VFAT_LN_ATTR_MASK) == VFAT_LN_ATTR)
+#define IS_VOLUME_LABEL(attr)   (((attr) & VFAT_ATTR_MASK) == ATTR_VOLUME)
+#define IS_DIR(attr)        (((attr) & VFAT_ATTR_MASK) == ATTR_DIR)
+#define IS_FILE(attr)       (((attr) & VFAT_ATTR_MASK) == 0)
 
 extern int atari_format;
 /* value to use as end-of-file marker */

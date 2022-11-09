@@ -208,7 +208,7 @@ static void __traverse_dir(DOS_FS *fs, uint32_t clus_num)
     clus_offset = dump__cluster_start(fs, clus_num);
     dump_area(clus_offset, fs->cluster_size, buf_clus);
 
-    while (clus_num > 0 && clus_num != -1) {
+    while (clus_num > 0 && clus_num < fs->clusters + FAT_START_ENT) {
         if (lseek(fd_in, clus_offset + offset, SEEK_SET) !=
                 clus_offset + offset)
             pdie("Seek to %lld of input(%d,%s)", clus_offset + offset, __LINE__, __func__);
@@ -242,7 +242,7 @@ static void __traverse_dir(DOS_FS *fs, uint32_t clus_num)
 
         p_de = &de;
         sub_clus = DE_START_CLUSTER(fs, p_de);
-        if (sub_clus > 0 && sub_clus != -1) {
+        if (sub_clus > 0 && sub_clus < fs->clusters + FAT_START_ENT) {
             traverse_tree(fs, sub_clus, de.attr);
         }
     }
@@ -250,10 +250,10 @@ static void __traverse_dir(DOS_FS *fs, uint32_t clus_num)
 
 static void traverse_tree(DOS_FS *fs, uint32_t clus_num, int attr)
 {
-    if (attr & ATTR_DIR) {
+    if (IS_DIR(attr)) {
         /* directory */
         __traverse_dir(fs, clus_num);
-    } else if (attr & ATTR_ARCH) {
+    } else if (IS_FILE(attr)) {
         /* file */
         __traverse_file(fs, clus_num);
     }
@@ -308,7 +308,7 @@ static void dump_data(DOS_FS *fs)
 
             p_de = &de;
             clus_num = DE_START_CLUSTER(fs, p_de);
-            if (clus_num > 0 && clus_num != -1) {
+            if (clus_num > 0 && clus_num < fs->clusters + FAT_START_ENT) {
                 traverse_tree(fs, clus_num, de.attr);
             }
         }

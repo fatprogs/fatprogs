@@ -157,7 +157,7 @@ void lfn_add_slot(DIR_ENT *de, loff_t dir_offset)
     if (lfn_slot == 0)
         lfn_check_orphaned();
 
-    if (de->attr != VFAT_LN_ATTR)
+    if (!IS_LFN_ENT(de->attr))
         die("lfn_add_slot called with non-LFN directory entry");
 
     if (lfn->id & LFN_ID_START && slot != 0) {
@@ -392,7 +392,7 @@ char *lfn_get(DIR_ENT *de)
     __u8 sum;
     int i;
 
-    if (de->attr == VFAT_LN_ATTR)
+    if (IS_LFN_ENT(de->attr))
         die("lfn_get called with LFN directory entry");
 
 #if 0

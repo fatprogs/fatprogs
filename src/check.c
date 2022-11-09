@@ -89,7 +89,7 @@ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
         /* find empty slot */
         while (clu_num > 0 && clu_num != -1) {
             fs_read(offset, sizeof(DIR_ENT), &d2);
-            if (IS_FREE(d2.name) && d2.attr != VFAT_LN_ATTR) {
+            if (IS_FREE(d2.name) && !IS_LFN_ENT(d2.attr)) {
                 got = 1;
                 break;
             }
@@ -193,7 +193,7 @@ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
 
         while (next_free < fs->root_entries) {
             if (IS_FREE(root_ent[next_free].name) &&
-                    root_ent[next_free].attr != VFAT_LN_ATTR)
+                    !IS_LFN_ENT(root_ent[next_free].attr))
                 break;
             else
                 next_free++;
@@ -445,7 +445,7 @@ static int __find_lfn(DOS_FS *fs, DOS_FILE *parent, loff_t offset,
 
     fs_read(offset, sizeof(DIR_ENT), &de);
 
-    if (de.attr == VFAT_LN_ATTR && !IS_FREE(de.name)) {
+    if (IS_LFN_ENT(de.attr) && !IS_FREE(de.name)) {
         scan_lfn(&de, offset);
         return 0;
     }
@@ -636,7 +636,7 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
                            shared with same cluster */
     uint32_t next_clus;
 
-    if (file->dir_ent.attr & ATTR_DIR) {
+    if (IS_DIR(file->dir_ent.attr)) {
         if (CF_LE_L(file->dir_ent.size)) {
             printf("%s\n  Directory has non-zero size. Fixing it.\n",
                     path_name(file));
@@ -697,7 +697,7 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
     }
 
     if (FSTART(file, fs) >= fs->clusters + FAT_START_ENT) {
-        if (file->dir_ent.attr & ATTR_DIR) {
+        if (IS_DIR(file->dir_ent.attr)) {
             printf("%s\n  Directory start cluster beyond limit (%u > %u). "
                     "Deleting dir.\n",
                     path_name(file), FSTART(file, fs),
@@ -742,7 +742,7 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
          * is it better that check outside of 'for' loop?
          * and already same check routine is there except calling
          * truncate_file(). */
-        if (!(file->dir_ent.attr & ATTR_DIR) && CF_LE_L(file->dir_ent.size) <=
+        if (IS_FILE(file->dir_ent.attr) && CF_LE_L(file->dir_ent.size) <=
                 (unsigned long long)clusters * fs->cluster_size) {
             printf("%s\n  File size is %u bytes, cluster chain length is > %llu "
                     "bytes.\n  Truncating file to %u bytes.\n",
@@ -759,11 +759,11 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
             /* already bit of curr is set in fs->real_bitmap */
             int do_trunc = 0;
 
-            printf("%s(second)\n  Share other file(first)'s clusters\n",
+            printf("%s(second)\n  Share other file(first)'s clusters.\n",
                     path_name(file));
             clusters2 = 0;
 
-            restart = file->dir_ent.attr & ATTR_DIR;
+            restart = IS_DIR(file->dir_ent.attr);
 
             if (!file->offset) {
                 printf("  Truncating first because second "
@@ -844,7 +844,7 @@ truncate_second:
                     /* Make start cluster to 0.
                      * If file is directory, then remove file. */
                     MODIFY_START(file, 0, fs);
-                    if (file->dir_ent.attr & ATTR_DIR) {
+                    if (IS_DIR(file->dir_ent.attr)) {
                         drop_file(fs, file);
                         break;
                     }
@@ -857,7 +857,7 @@ truncate_second:
         prev = curr;
     }
 
-    if (!(file->dir_ent.attr & ATTR_DIR) && CF_LE_L(file->dir_ent.size) >
+    if (IS_FILE(file->dir_ent.attr) && CF_LE_L(file->dir_ent.size) >
             (unsigned long long)clusters * fs->cluster_size) {
 
         printf("%s\n  File size is %u bytes, cluster chain length is %llu bytes."
@@ -868,6 +868,8 @@ truncate_second:
         MODIFY(file, size,
                 CT_LE_L((unsigned long long)clusters * fs->cluster_size));
     }
+
+    /* TODO: check NT resource field (should be always 0x0) */
 
     return 0;
 }
@@ -928,7 +930,7 @@ static int check_dir(DOS_FS *fs, DOS_FILE **root, int dots)
     walk = root;
     while (*walk) {
         /* bad name check */
-        if (!((*walk)->dir_ent.attr & ATTR_VOLUME) &&
+        if (!IS_VOLUME_LABEL((*walk)->dir_ent.attr) &&
                 bad_name((*walk)->dir_ent.name)) {
 
             printf("%s\n", path_name(*walk));
@@ -972,11 +974,11 @@ static int check_dir(DOS_FS *fs, DOS_FILE **root, int dots)
         }
 
         /* don't check for duplicates of the volume label */
-        if (!((*walk)->dir_ent.attr & ATTR_VOLUME)) {
+        if (!IS_VOLUME_LABEL((*walk)->dir_ent.attr)) {
             scan = &(*walk)->next;
             skip = 0;
             while (*scan && !skip) {
-                if (!((*scan)->dir_ent.attr & ATTR_VOLUME) &&
+                if (!IS_VOLUME_LABEL((*scan)->dir_ent.attr) &&
                         !strncmp((char *)((*walk)->dir_ent.name),
                             (char *)((*scan)->dir_ent.name), MSDOS_NAME)) {
                     printf("%s\n  Duplicate directory entry.\n  First  %s\n",
@@ -1205,7 +1207,7 @@ static void add_file(DOS_FS *fs, DOS_FILE ***chain, DOS_FILE *parent,
         if (!strncmp((char *)de.name, MSDOS_DOT, LEN_FILE_NAME)) {
             dot = 1;
         }
-        printf("Found invalid %s entry on (%s%s%s)\n",
+        printf("Found invalid %s entry (%s%s%s)\n",
                 dot ? "dot" : "dotdot", path_name(parent),
                 parent->lfn ? "/" : "",
                 dot ? "." : "..");
@@ -1243,7 +1245,7 @@ static void add_file(DOS_FS *fs, DOS_FILE ***chain, DOS_FILE *parent,
     }
 
     if ((type = file_type(cp, (char *)de.name)) != fdt_none) {
-        if (type == fdt_undelete && (de.attr & ATTR_DIR))
+        if (type == fdt_undelete && IS_DIR(de.attr))
             die("Can't undelete directories.");
         file_modify(cp, (char *)de.name);
         fs_write(offset, 1, &de);
@@ -1254,7 +1256,7 @@ static void add_file(DOS_FS *fs, DOS_FILE ***chain, DOS_FILE *parent,
         return;
     }
 
-    if (de.attr == VFAT_LN_ATTR) {
+    if (IS_LFN_ENT(de.attr)) {
         lfn_add_slot(&de, offset);
         return;
     }
@@ -1351,10 +1353,18 @@ static int subdirs(DOS_FS *fs, DOS_FILE *parent, FDSC **cp)
 {
     DOS_FILE *walk;
 
-    for (walk = parent ? parent->first : root; walk; walk = walk->next)
-        if (walk->dir_ent.attr & ATTR_DIR)
+    for (walk = parent ? parent->first : root; walk; walk = walk->next) {
+        if (IS_DIR(walk->dir_ent.attr)) {
             if (scan_dir(fs, walk, file_cd(cp, (char *)(walk->dir_ent.name))))
                 return 1;
+        }
+        else if (!IS_FILE(walk->dir_ent.attr) &&
+                !IS_VOLUME_LABEL(walk->dir_ent.attr)) {
+            printf("%s\n  Invalid directory entry.(%d)\n"
+                    "  Not auto-correcting this.\n",
+                    path_name(walk), walk->dir_ent.attr);
+        }
+    }
     return 0;
 }
 
@@ -2134,7 +2144,9 @@ static int add_dot_entries(DOS_FS *fs, DOS_FILE *parent, int dots)
     }
 
     if (new_clus == FAT_START_ENT) {
-        die("Can't find free cluster\n");
+        printf("Can't find free cluster. Can't add %s entry\n",
+                dots == DOT_ENTRY ? "dot" : "dotdot");
+        return -1;
     }
 
     /* allocate new cluster and make it second cluster,
@@ -2269,7 +2281,7 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
         if (list)
             printf("Checking file %s\n", path_name(dot_file));
 
-        if (!(de->attr & ATTR_DIR)) {
+        if (!IS_DIR(de->attr)) {
             printf("%s\n  Fixing invalid attribute of %s entry('%s').\n",
                     path_name(dot_file->parent),
                     (dots == DOT_ENTRY) ? "first" : "second",
@@ -2397,11 +2409,11 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
     if (interactive) {
         printf("1) Drop '%s' entry\n"
                 "2) Drop parent entry\n"
-                "3) Add dots entry to %s slot\n",
+                "3) Add dots entry to newly allocated cluster's %s slot\n",
                 file_name(de->name), (dots == DOT_ENTRY) ? "first" : "second");
     }
     else
-        printf("  Auto-adding %s entry to %s slot.\n",
+        printf("  Auto-adding %s entry to newly allocated cluster's %s slot.\n",
                 (dots == DOT_ENTRY) ? "dot('.')" : "dotdot('..')",
                 (dots == DOT_ENTRY) ? "first" : "second");
 
@@ -2520,7 +2532,7 @@ static DOS_FILE *__get_owner_subdir(DOS_FS *fs, DOS_FILE *parent,
         if (check_file_owner(fs, walk, cluster, -1))
             return walk;
 
-        if (walk->dir_ent.attr & ATTR_DIR) {
+        if (IS_DIR(walk->dir_ent.attr)) {
             owner = __get_owner_subdir(fs, walk, cluster);
             if (owner)
                 return owner;
@@ -2570,7 +2582,7 @@ static DOS_FILE *find_owner(DOS_FS *fs, uint32_t cluster)
         if (check_file_owner(fs, walk, cluster, -1))
             return walk;
 
-        if (walk->dir_ent.attr & ATTR_DIR) {
+        if (IS_DIR(walk->dir_ent.attr)) {
             owner = __get_owner_subdir(fs, walk, cluster);
             if (owner)
                 return owner;
