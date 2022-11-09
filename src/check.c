@@ -412,7 +412,6 @@ static void truncate_file(DOS_FS *fs, DOS_FILE *file, uint32_t clusters)
         else if ((deleting = !--clusters)) {
             set_fat(fs, walk, -1);
         }
-
         walk = next;
     }
 }
@@ -783,7 +782,7 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
                             return 1;
 
                         while (this > 0 && this != -1) {
-                            /* TODO: check bitmap */
+                            /* TODO: is it need to call set_fat()? */
                             set_fat(fs, this, 0);
                             clear_bitmap_occupied(fs, this);
                             this = next_cluster(fs, this);

@@ -54,8 +54,8 @@ void *alloc_mem(int size)
 
     if ((this = malloc(size))) {
         memset(this, 0, size);
-        total_alloc += size;
 
+        total_alloc += size;
         if (total_alloc > max_alloc)
             max_alloc = total_alloc;
 

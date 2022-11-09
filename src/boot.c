@@ -188,18 +188,18 @@ static void check_backup_boot(DOS_FS *fs, struct boot_sector *b, int lss)
     }
 }
 
-static void init_fsinfo(struct fsinfo_sector *i)
+static void init_fsinfo(struct fsinfo_sector *fsinfo)
 {
-    i->magic = CT_LE_L(LEAD_SIGN);
-    i->signature = CT_LE_L(STRUCT_SIGN);
-    i->free_clusters = CT_LE_L(-1);
-    i->next_cluster = CT_LE_L(2);
-    i->boot_sign = CT_LE_W(BOOT_SIGN);
+    fsinfo->magic = CT_LE_L(LEAD_SIGN);
+    fsinfo->signature = CT_LE_L(STRUCT_SIGN);
+    fsinfo->free_clusters = CT_LE_L(-1);
+    fsinfo->next_cluster = CT_LE_L(2);
+    fsinfo->boot_sign = CT_LE_W(BOOT_SIGN);
 }
 
 static void read_fsinfo(DOS_FS *fs, struct boot_sector *b, int lss)
 {
-    struct fsinfo_sector i;
+    struct fsinfo_sector fsinfo;
 
     if (!b->fat32.info_sector) {
         printf("No FSINFO sector\n");
@@ -220,8 +220,8 @@ static void read_fsinfo(DOS_FS *fs, struct boot_sector *b, int lss)
             }
 
             if (s > 0 && s < CF_LE_W(b->reserved_cnt)) {
-                init_fsinfo(&i);
-                fs_write((off_t)s * lss, sizeof(i), &i);
+                init_fsinfo(&fsinfo);
+                fs_write((off_t)s * lss, sizeof(fsinfo), &fsinfo);
                 b->fat32.info_sector = CT_LE_W(s);
                 fs_write((off_t)offsetof(struct boot_sector, fat32.info_sector),
                         sizeof(b->fat32.info_sector), &b->fat32.info_sector);
@@ -241,28 +241,28 @@ static void read_fsinfo(DOS_FS *fs, struct boot_sector *b, int lss)
     }
 
     fs->fsinfo_start = CF_LE_W(b->fat32.info_sector) * lss;
-    fs_read(fs->fsinfo_start, sizeof(i), &i);
+    fs_read(fs->fsinfo_start, sizeof(fsinfo), &fsinfo);
 
-    if (i.magic != CT_LE_L(LEAD_SIGN) ||
-            i.signature != CT_LE_L(STRUCT_SIGN) ||
-            i.boot_sign != CT_LE_W(BOOT_SIGN)) {
+    if (fsinfo.magic != CT_LE_L(LEAD_SIGN) ||
+            fsinfo.signature != CT_LE_L(STRUCT_SIGN) ||
+            fsinfo.boot_sign != CT_LE_W(BOOT_SIGN)) {
 
         printf("FSINFO sector has bad magic number(s):\n");
 
-        if (i.magic != CT_LE_L(LEAD_SIGN))
+        if (fsinfo.magic != CT_LE_L(LEAD_SIGN))
             printf("  Offset %llu: 0x%08x != expected 0x%08x\n",
                     (unsigned long long)offsetof(struct fsinfo_sector, magic),
-                    CF_LE_L(i.magic), LEAD_SIGN);
+                    CF_LE_L(fsinfo.magic), LEAD_SIGN);
 
-        if (i.signature != CT_LE_L(STRUCT_SIGN))
+        if (fsinfo.signature != CT_LE_L(STRUCT_SIGN))
             printf("  Offset %llu: 0x%08x != expected 0x%08x\n",
                     (unsigned long long)offsetof(struct fsinfo_sector, signature),
-                    CF_LE_L(i.signature), STRUCT_SIGN);
+                    CF_LE_L(fsinfo.signature), STRUCT_SIGN);
 
-        if (i.boot_sign != CT_LE_W(BOOT_SIGN))
+        if (fsinfo.boot_sign != CT_LE_W(BOOT_SIGN))
             printf("  Offset %llu: 0x%04x != expected 0x%04x\n",
                     (unsigned long long)offsetof(struct fsinfo_sector, boot_sign),
-                    CF_LE_W(i.boot_sign), BOOT_SIGN);
+                    CF_LE_W(fsinfo.boot_sign), BOOT_SIGN);
 
         if (interactive)
             printf("1) Correct\n2) Don't correct (FSINFO invalid then)\n");
@@ -270,15 +270,15 @@ static void read_fsinfo(DOS_FS *fs, struct boot_sector *b, int lss)
             printf("  Auto-correcting it.\n");
 
         if (!interactive || get_key("12", "?") == '1') {
-            init_fsinfo(&i);
-            fs_write(fs->fsinfo_start, sizeof(i), &i);
+            init_fsinfo(&fsinfo);
+            fs_write(fs->fsinfo_start, sizeof(fsinfo), &fsinfo);
         }
         else
             fs->fsinfo_start = 0;
     }
 
     if (fs->fsinfo_start)
-        fs->free_clusters = CF_LE_L(i.free_clusters);
+        fs->free_clusters = CF_LE_L(fsinfo.free_clusters);
 }
 
 void read_boot(DOS_FS *fs)

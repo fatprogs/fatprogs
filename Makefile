@@ -26,9 +26,12 @@ distclean:
 	$(MAKE) -C src $@
 	rm -f TAGS .#* .new* \#*# *~
 
-debug: OPTFLAGS = -O0 -g -fno-omit-frame-pointer -D_FILE_OFFSET_BITS=64 -fsanitize=address
-debug: LDFLAGS += -fsanitize=address
+debug: OPTFLAGS = -g -fno-omit-frame-pointer -D_FILE_OFFSET_BITS=64 -DDEBUG -pg
 debug: all
+
+asan: OPTFLAGS = -g -fno-omit-frame-pointer -D_FILE_OFFSET_BITS=64 -O0 -fsanitize=address
+asan: LDFLAGS += -fsanitize=address
+asan: all
 
 TAGS:
 	etags -d -T `find . -name '*.[ch]'`
