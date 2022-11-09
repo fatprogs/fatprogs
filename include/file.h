@@ -10,7 +10,7 @@
 typedef enum {fdt_none, fdt_drop, fdt_undelete} FD_TYPE;
 
 typedef struct _fptr {
-    char name[MSDOS_NAME];
+    char name[MSDOS_NAME + 1];
     FD_TYPE type;
     struct _fptr *first;    /* first entry */
     struct _fptr *next;     /* next file in directory */

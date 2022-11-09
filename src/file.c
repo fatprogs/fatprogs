@@ -165,6 +165,7 @@ void file_add(char *path, FD_TYPE type)
 
         if (!walk) {
             walk = alloc_mem(sizeof(FDSC));
+            memset(walk->name, 0, MSDOS_NAME + 1);
             strncpy(walk->name, name, MSDOS_NAME);
             walk->type = here ? fdt_none : type;
             walk->first = NULL;

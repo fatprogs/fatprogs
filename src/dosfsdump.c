@@ -604,7 +604,8 @@ int main(int argc, char *argv[])
 
     check_atari(&atari_format);
 
-    memcpy(outfile, DUMP_FILENAME, 255);
+    memset(outfile, 0, 256);
+    memcpy(outfile, DUMP_FILENAME, strlen(DUMP_FILENAME));
     while ((c = getopt(argc, argv, "f:o:vh")) != EOF) {
         switch (c) {
             case 'f':
