@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier : GPL-2.0 */
 
-/* dosfsdump.c  -  User interface */
+/* Copyright (c) 2022 LG Electronics Inc. */
 
 #include "version.h"
 

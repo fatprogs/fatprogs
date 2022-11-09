@@ -13,6 +13,8 @@
 /* FAT32, VFAT, Atari format support, and various fixes additions May 1998
  * by Roman Hodek <Roman.Hodek@informatik.uni-erlangen.de> */
 
+/* Copyright (c) 2022 LG Electronics Inc. */
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>

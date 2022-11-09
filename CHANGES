@@ -1,3 +1,27 @@
+fatprogs v2.13.0 - released 2022-7-18
+=====================================
+
+CHANGES:
+ * dosfsck: dirty flag clean after all changes are flushed.
+ * dosfsck: remove 'reclaim_bitmap' field while reuse 'bitmap' for reclaiming.
+ * dosfsck: change default action(removal) for corrupted LFN.
+ * dosfsck: modify file size field instead of trucating file.
+ * dosfsdump: make default option to dump metadata only.
+ * dosfsck: consider corrupted directory if it has too many bad files.
+
+NEW FEATURES:
+ * dosfsdump: add option to redirect dump data to standard output.
+ * dosfsck: use FOUND.XXX directory for reclaimed files.
+
+BUF FIXES:
+ * mkdosfs: fix wrong root directory initialization.
+ * dosfsck: check boot signature more strictly to distinguish from ntfs.
+ * dosfsck: remove checking time field of dot/dotdot entry.
+ * mkdosfs: fix wrong media type location writing.
+ * dosfsck: fix FAT start offset for unaligned (with PAGE_SIZE) FAT volume.
+ * dosfsck: set EOC to first free FAT entry of root directory.
+
+
 fatprogs v2.12.2 - released 2022-5-08
 =====================================
 
