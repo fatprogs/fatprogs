@@ -1365,7 +1365,7 @@ void get_label(char *new_label)
                 continue;
             }
 
-            ret = check_boot_label(temp_label);
+            ret = check_valid_label(temp_label);
             if (ret < 0) {
                 printf("label is not valid\n");
                 continue;
@@ -1781,6 +1781,7 @@ int check_volume_label(DOS_FS *fs)
                 }
 
                 write_boot_label(fs, label_temp);
+                /* need to check valid label : LABEL_FLAG_BAD */
                 break;
             case '3':
                 do {
@@ -1816,12 +1817,19 @@ int check_volume_label(DOS_FS *fs)
                 printf("  Selected label (%s)\n", label_temp);
 
                 write_boot_label(fs, label_temp);
+                /* need to check valid label : LABEL_FLAG_BAD */
                 break;
         }
     }
 
     if (label_head != label_last) {
-        printf("error!!! There are still more than one root label entries\n");
+        printf("Error!!! There are still more than one root label entries\n");
+        ret = -1;
+        goto exit;
+    }
+
+    if (!label_head) {
+        printf("Error!! There is still no root label\n");
         ret = -1;
         goto exit;
     }
@@ -1832,7 +1840,7 @@ int check_volume_label(DOS_FS *fs)
     memcpy(label_temp, walk->dir_ent.name, LEN_VOLUME_LABEL);
 
     /* handle bad label in root entry */
-    if (lwalk && (lwalk->flag & LABEL_FLAG_BAD)) {
+    if (lwalk->flag & LABEL_FLAG_BAD) {
         printf("Label '%s' in root entry is not valid\n", label_temp);
         if (interactive)
             printf("1) Remove invalid root label\n"
@@ -1856,8 +1864,37 @@ int check_volume_label(DOS_FS *fs)
         goto exit;
     }
 
+    /* check boot label, boot label is valid here */
+    if (check_valid_label(fs->label) == -1) {
+        printf("Label '%s' in boot sector is not valid."
+                " but label '%s' in root entry is valid.\n",
+                fs->label, label_temp);
+        if (interactive)
+            printf("1) Copy label from root entry to boot\n"
+                    "2) Set new label\n");
+        else
+            printf("  Auto-copying label from root entry.\n");
+
+        switch (interactive ? get_key("12", "?") : '1') {
+            case '1':
+                write_boot_label(fs, label_temp);
+                memcpy(fs->label, label_temp, LEN_VOLUME_LABEL);
+                break;
+            case '2': {
+                char new_label[LEN_VOLUME_LABEL + 1] = {'\0', };
+
+                get_label(new_label);
+                write_label(fs, new_label, &label_head, &label_last);
+                break;
+            }
+        }
+        ret = 0;
+        goto exit;
+    }
+
     /* handle different volume label in boot and root */
     if (memcmp(fs->label, label_temp, LEN_VOLUME_LABEL) != 0) {
+
         printf("Label '%s' in root entry "
                 "and label '%s' in boot sector are different\n",
                 label_temp, fs->label);
