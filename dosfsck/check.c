@@ -478,10 +478,8 @@ static void auto_rename(DOS_FS *fs, DOS_FILE *file)
             fs_write(file->offset, MSDOS_NAME, file->dir_ent.name);
 
             /* remove lfn related with previous name */
-            if (file->lfn) {
-                remove_lfn(fs, file);
-                file->lfn = NULL;
-            }
+            remove_lfn(fs, file);
+            file->lfn = NULL;
             return;
         }
 
@@ -521,10 +519,8 @@ static void rename_file(DOS_FS *fs, DOS_FILE *file)
                 fs_write(file->offset, MSDOS_NAME, file->dir_ent.name);
 
                 /* remove lfn related with previous name */
-                if (file->lfn) {
-                    remove_lfn(fs, file);
-                    file->lfn = NULL;
-                }
+                remove_lfn(fs, file);
+                file->lfn = NULL;
                 return;
             }
         }

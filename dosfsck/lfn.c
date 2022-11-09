@@ -195,8 +195,10 @@ void lfn_add_slot(DIR_ENT *de, loff_t dir_offset)
                         lfn_reset();
                         break;
                     case '2':
+                        lfn_reset();
                         break;
                     case '3':
+                        /* TODO: modify lfn_slot to concatenated LFN slots ?? */
                         lfn->id &= ~LFN_ID_START;
                         fs_write(dir_offset + offsetof(LFN_ENT, id),
                                 sizeof(lfn->id), &lfn->id);
