@@ -1205,10 +1205,10 @@ static void setup_tables(void)
                 writebuf(fat, sector_size, "FAT");
             }
         }
-        mark_FAT_cluster(0, 0x00ffffff | bs.media << 24);	/* Initial fat entries */
+        mark_FAT_cluster(0, 0x0fffff00 | bs.media);	/* Initial fat entries */
     }
 
-    mark_FAT_cluster(1, 0xffffffff);
+    mark_FAT_cluster(1, 0x0fffffff);
     if (fat_bits == 32) {
         /* Mark cluster 2 as EOF (used for root dir) */
         mark_FAT_cluster(2, VALUE_FAT_EOF);
@@ -1365,6 +1365,10 @@ static void write_tables(void)
 
     free_mem(root_dir);   /* Free up the root directory space from setup_tables */
     free_mem(fat);  /* Free up the fat table space reserved during setup_tables */
+
+    if (fsync(dev) < 0) {
+        error("Error: fsync failed");
+    }
 }
 
 /* Report the command usage and return a failure error code */
@@ -1730,6 +1734,7 @@ int main(int argc, char **argv)
     print_mem();
     write_tables();		/* Write the file system tables away! */
 
+    close(dev);
     exit(0);            /* Terminate with no errors! */
 }
 

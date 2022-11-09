@@ -58,7 +58,7 @@ void fs_open(char *path, int rw)
 {
     struct stat stbuf;
 
-    if ((fd = open(path, rw ? O_RDWR : O_RDONLY)) < 0)
+    if ((fd = open(path, (rw ? O_RDWR : O_RDONLY) | O_EXCL)) < 0)
         pdie("open %s", path);
 
     changes = last = NULL;

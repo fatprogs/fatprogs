@@ -182,7 +182,7 @@ static void __traverse_file(DOS_FS *fs, uint32_t clus_num)
 
         cluster = dump__next_cluster(fs, cluster);
 
-    } while (cluster > 0 && cluster < fs->clusters + FAT_START_ENT);
+    } while (cluster != -1 && cluster < fs->clusters + FAT_START_ENT);
 }
 
 static void __traverse_dir(DOS_FS *fs, uint32_t clus_num)
@@ -340,9 +340,14 @@ static void dump__read_fat(DOS_FS *fs)
 
         num_cluster = read_size / fs->fat_bits;
         for (i = start; i < num_cluster; i++) {
+            if (total_cluster + i >= max_clus_num) {
+                break;
+            }
+
             dump__get_fat(fs, total_cluster + i, &clus_num);
             if (!clus_num)
                 continue;
+
             if (clus_num >= fs->clusters + FAT_START_ENT &&
                     clus_num < FAT_MIN_BAD(fs)) {
                 printf("WARN: Cluster %u out of range (%u > %u). Setting to EOF.\n",
@@ -702,7 +707,9 @@ int main(int argc, char *argv[])
     }
 
     dump_data(&fs);
-    dump_orphaned(&fs);
+    if (dump_flag == DUMP_ALL) {
+        dump_orphaned(&fs);
+    }
 
     free_mem(buf_clus);
 

@@ -177,6 +177,10 @@ void read_fat(DOS_FS *fs)
 
         cpr = read_size / clus_size;
         for (i = start; i < cpr; i++) {
+            if (total_cluster + i >= max_clus_num) {
+                break;
+            }
+
             get_fat(fs, total_cluster + i, &clus_num);
             if (!clus_num)
                 continue;
@@ -203,7 +207,7 @@ void read_fat(DOS_FS *fs)
         }
 
         start = 0;
-        total_cluster += cpr;
+        total_cluster += i;
         offset += read_size;
 
         remain_size -= read_size;
@@ -240,7 +244,7 @@ static void read_fat_cache(DOS_FS *fs, uint32_t cluster)
     /* fat_start is not page aligned address */
     else {
         /* first cache */
-        if (cluster >= 0 && cluster < fs->fat_cache.first_cpc) {
+        if (cluster < fs->fat_cache.first_cpc) {
             fs->fat_cache.start = 0;
             fs->fat_cache.cnt = fs->fat_cache.first_cpc;
         }

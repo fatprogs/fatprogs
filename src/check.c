@@ -681,11 +681,21 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
 
     }
 
-    if (IS_VOLUME_LABEL(file->dir_ent.attr) && FSTART(file, fs) != 0) {
-        printf("%s\n  Volume label has start cluster. Fix it to 0\n",
-                path_name(file));
-        MODIFY_START(file, 0, fs);
-        return 0;
+    if (IS_VOLUME_LABEL(file->dir_ent.attr)) {
+        if (file->parent != root) {
+            printf("%s\n Volume label can only be existed in root directory."
+                    " Deleting it\n", path_name(file));
+            remove_lfn(fs, file);
+            MODIFY(file, name[0], DELETED_FLAG);
+            return 0;
+        }
+
+        if ((file->parent == root) && FSTART(file, fs) != 0) {
+            printf("%s\n  Volume label has start cluster. Fix it to 0.\n",
+                    path_name(file));
+            MODIFY_START(file, 0, fs);
+            return 0;
+        }
     }
 
     if (FSTART(file, fs) >= max_clus_num) {
@@ -720,8 +730,16 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
                 set_fat(fs, prev, -1);
             else if (!file->offset)
                 die("FAT32 root dir starts with a bad cluster!");
-            else
+            else {
+                /* set start cluster to zero */
                 MODIFY_START(file, 0, fs);
+                if (IS_DIR(file->dir_ent.attr)) {
+                    /* if file is directory, then remove it */
+                    remove_lfn(fs, file);
+                    MODIFY(file, name[0], DELETED_FLAG);
+                    return 0;
+                }
+            }
             break;
         }
 
@@ -897,8 +915,19 @@ static int check_dir(DOS_FS *fs, DOS_FILE **root, int dots)
                 path_name(parent), bad, good + bad);
         if (!dots)
             printf("  Not dropping root directory.\n");
-        else if (!interactive)
+        else if (!interactive) {
+            if (bad > (good * 10)) {
+                /* In case that all files in parent are bad,
+                 * becuase directory cluster for directory entries is not syncing,
+                 * drop it. */
+                printf("  Almost files in parent(%s) are bad. Dropping parent.\n",
+                        path_name(parent));
+                truncate_file(fs, parent, 0);
+                MODIFY(parent, name[0], DELETED_FLAG);
+                return 1;
+            }
             printf("  Not dropping it in auto-mode.\n");
+        }
         else if (get_key("yn", "Drop directory ? (y/n)") == 'y') {
             truncate_file(fs, parent, 0);
             MODIFY(parent, name[0], DELETED_FLAG);
@@ -2411,7 +2440,7 @@ int check_dirty_flag(DOS_FS *fs)
     get_fat(fs, 1, &value);
     if ((fs->fat_state & FAT_STATE_DIRTY) || !(value & dirty_mask)) {
         printf("FAT dirty flag is set. Boot(%s):FAT(%s)\n"
-                "  Filesystem might be shudowned unexpectedly,\n"
+                "  Filesystem might be shutdowned unexpectedly,\n"
                 "  So filesystem may be corrupted.\n\n",
                 (fs->fat_state & FAT_STATE_DIRTY) ? "dirty" : "clean",
                 (value & dirty_mask) == dirty_mask ? "clean" : "dirty");
