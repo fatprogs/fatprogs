@@ -57,21 +57,21 @@ static loff_t llseek( int fd, loff_t offset, int whence )
 void fs_open(char *path,int rw)
 {
     struct stat stbuf;
-    
+
     if ((fd = open(path,rw ? O_RDWR : O_RDONLY)) < 0)
-	pdie("open %s",path);
+        pdie("open %s",path);
     changes = last = NULL;
     did_change = 0;
 
 #ifndef _DJGPP_
     if (fstat(fd,&stbuf) < 0)
-	pdie("fstat %s",path);
+        pdie("fstat %s",path);
     device_no = S_ISBLK(stbuf.st_mode) ? (stbuf.st_rdev >> 8) & 0xff : 0;
 #else
     if (IsWorkingOnImageFile()) {
-	if (fstat(GetVolumeHandle(),&stbuf) < 0)
-	    pdie("fstat image %s",path);
-	device_no = 0;
+        if (fstat(GetVolumeHandle(),&stbuf) < 0)
+            pdie("fstat image %s",path);
+        device_no = 0;
     }
     else {
         /* return 2 for floppy, 1 for ramdisk, 7 for loopback  */
@@ -94,13 +94,13 @@ void fs_read(loff_t pos,int size,void *data)
     if ((got = read(fd,data,size)) < 0) pdie("Read %d bytes at %lld",size,pos);
     if (got != size) die("Got %d bytes instead of %d at %lld",got,size,pos);
     for (walk = changes; walk; walk = walk->next) {
-	if (walk->pos < pos+size && walk->pos+walk->size > pos) {
-	    if (walk->pos < pos)
-		memcpy(data,(char *) walk->data+pos-walk->pos,min(size,
-		  walk->size-pos+walk->pos));
-	    else memcpy((char *) data+walk->pos-pos,walk->data,min(walk->size,
-		  size+pos-walk->pos));
-	}
+        if (walk->pos < pos+size && walk->pos+walk->size > pos) {
+            if (walk->pos < pos)
+                memcpy(data,(char *) walk->data+pos-walk->pos,min(size,
+                            walk->size-pos+walk->pos));
+            else memcpy((char *) data+walk->pos-pos,walk->data,min(walk->size,
+                        size+pos-walk->pos));
+        }
     }
 }
 
@@ -124,11 +124,11 @@ void fs_write(loff_t pos,int size,void *data)
     int did;
 
     if (write_immed) {
-	did_change = 1;
-	if (llseek(fd,pos,0) != pos) pdie("Seek to %lld",pos);
-	if ((did = write(fd,data,size)) == size) return;
-	if (did < 0) pdie("Write %d bytes at %lld",size,pos);
-	die("Wrote %d bytes instead of %d at %lld",did,size,pos);
+        did_change = 1;
+        if (llseek(fd,pos,0) != pos) pdie("Seek to %lld",pos);
+        if ((did = write(fd,data,size)) == size) return;
+        if (did < 0) pdie("Write %d bytes at %lld",size,pos);
+        die("Wrote %d bytes instead of %d at %lld",did,size,pos);
     }
     new = alloc(sizeof(CHANGE));
     new->pos = pos;
@@ -146,19 +146,19 @@ static void fs_flush(void)
     int size;
 
     while (changes) {
-	this = changes;
-	changes = changes->next;
-	if (llseek(fd,this->pos,0) != this->pos)
-	    fprintf(stderr,"Seek to %lld failed: %s\n  Did not write %d bytes.\n",
-	      (long long)this->pos,strerror(errno),this->size);
-	else if ((size = write(fd,this->data,this->size)) < 0)
-		fprintf(stderr,"Writing %d bytes at %lld failed: %s\n",this->size,
-		  (long long)this->pos,strerror(errno));
-	    else if (size != this->size)
-		    fprintf(stderr,"Wrote %d bytes instead of %d bytes at %lld."
-		      "\n",size,this->size,(long long)this->pos);
-	free(this->data);
-	free(this);
+        this = changes;
+        changes = changes->next;
+        if (llseek(fd,this->pos,0) != this->pos)
+            fprintf(stderr,"Seek to %lld failed: %s\n  Did not write %d bytes.\n",
+                    (long long)this->pos,strerror(errno),this->size);
+        else if ((size = write(fd,this->data,this->size)) < 0)
+            fprintf(stderr,"Writing %d bytes at %lld failed: %s\n",this->size,
+                    (long long)this->pos,strerror(errno));
+        else if (size != this->size)
+            fprintf(stderr,"Wrote %d bytes instead of %d bytes at %lld."
+                    "\n",size,this->size,(long long)this->pos);
+        free(this->data);
+        free(this);
     }
 }
 
@@ -171,11 +171,11 @@ int fs_close(int write)
     changed = !!changes;
     if (write) fs_flush();
     else while (changes) {
-	    next = changes->next;
-	    free(changes->data);
-	    free(changes);
-	    changes = next;
-	}
+        next = changes->next;
+        free(changes->data);
+        free(changes);
+        changes = next;
+    }
     if (close(fd) < 0) pdie("closing file system");
     return changed || did_change;
 }

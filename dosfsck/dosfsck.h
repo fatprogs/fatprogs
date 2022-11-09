@@ -44,7 +44,7 @@
 struct boot_sector {
     __u8	ignored[3];	/* Boot strap short or near jump */
     __u8	system_id[8];	/* Name - can be used to special case
-				   partition manager volumes */
+                               partition manager volumes */
     __u8	sector_size[2];	/* bytes per logical sector */
     __u8	cluster_size;	/* sectors/cluster */
     __u16	reserved;	/* reserved sectors */
@@ -57,7 +57,7 @@ struct boot_sector {
     __u16	heads;		/* number of heads */
     __u32	hidden;		/* hidden sectors (unused) */
     __u32	total_sect;	/* number of sectors (if sectors == 0) */
-    
+
     /* The following fields are only used by FAT32 */
     __u32	fat32_length;	/* sectors/FAT */
     __u16	flags;		/* bit 8: fat mirroring, low 4: active fat */
@@ -82,7 +82,7 @@ struct boot_sector {
 struct boot_sector_16 {
     __u8	ignored[3];	/* Boot strap short or near jump */
     __u8	system_id[8];	/* Name - can be used to special case
-				   partition manager volumes */
+                               partition manager volumes */
     __u8	sector_size[2];	/* bytes per logical sector */
     __u8	cluster_size;	/* sectors/cluster */
     __u16	reserved;	/* reserved sectors */

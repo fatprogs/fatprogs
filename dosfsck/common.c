@@ -71,10 +71,10 @@ void qfree(void **root)
     LINK *this;
 
     while (*root) {
-	this = (LINK *) *root;
-	*root = this->next;
-	free(this->data);
-	free(this);
+        this = (LINK *) *root;
+        *root = this->next;
+        free(this->data);
+        free(this);
     }
 }
 
@@ -90,15 +90,15 @@ char get_key(char *valid,char *prompt)
     int ch,okay;
 
     while (1) {
-	if (prompt) printf("%s ",prompt);
-	fflush(stdout);
-	while (ch = getchar(), ch == ' ' || ch == '\t');
-	if (ch == EOF) exit(1);
-	if (!strchr(valid,okay = ch)) okay = 0;
-	while (ch = getchar(), ch != '\n' && ch != EOF);
-	if (ch == EOF) exit(1);
-	if (okay) return okay;
-	printf("Invalid input.\n");
+        if (prompt) printf("%s ",prompt);
+        fflush(stdout);
+        while (ch = getchar(), ch == ' ' || ch == '\t');
+        if (ch == EOF) exit(1);
+        if (!strchr(valid,okay = ch)) okay = 0;
+        while (ch = getchar(), ch != '\n' && ch != EOF);
+        if (ch == EOF) exit(1);
+        if (okay) return okay;
+        printf("Invalid input.\n");
     }
 }
 
