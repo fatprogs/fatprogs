@@ -6,11 +6,12 @@ CC = gcc
 CPP = $(CC) -E
 OPTFLAGS = -O2 -fomit-frame-pointer -D_FILE_OFFSET_BITS=64
 WARNFLAGS = -Wall
-DEBUGFLAGS = 
+DEBUGFLAGS =
 CFLAGS = $(OPTFLAGS) $(WARNFLAGS) $(DEBUGFLAGS)
 LDFLAGS =
+#LDFLAGS = -fsanitize=address
 
-PREFIX = 
+PREFIX =
 SBINDIR = $(PREFIX)/sbin
 MANDIR = $(PREFIX)/usr/man/man8
 
@@ -25,6 +26,10 @@ distclean:
 	$(MAKE) -C mkdosfs $@
 	$(MAKE) -C dosfsck $@
 	rm -f TAGS .#* .new* \#*# *~
+
+debug: OPTFLAGS = -O -g -fno-omit-frame-pointer -D_FILE_OFFSET_BITS=64 -fsanitize=address
+debug: LDFLAGS += -fsanitize=address
+debug: all
 
 TAGS:
 	etags -d -T `find . -name '*.[ch]'`

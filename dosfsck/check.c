@@ -25,7 +25,7 @@ static DOS_FILE *root;
 
 /* get start field of a dir entry */
 #define FSTART(p,fs) \
-    ((unsigned long)CF_LE_W(p->dir_ent.start) | \
+    ((uint32_t)CF_LE_W(p->dir_ent.start) | \
      (fs->fat_bits == 32 ? CF_LE_W(p->dir_ent.starthi) << 16 : 0))
 
 #define MODIFY(p,i,v)					\
@@ -39,7 +39,7 @@ static DOS_FILE *root;
 
 #define MODIFY_START(p,v,fs)						\
     do {									\
-        unsigned long __v = (v);						\
+        uint32_t __v = (v);						\
         if (!p->offset) {							\
             /* writing to fake entry for FAT32 root dir */			\
             if (!__v) die("Oops, deleting FAT32 root dir!");		\
@@ -67,7 +67,7 @@ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
     if (fs->root_cluster) {
         DIR_ENT d2;
         int i = 0, got = 0;
-        unsigned long clu_num, prev = 0;
+        uint32_t clu_num, prev = 0;
         loff_t offset2;
 
         clu_num = fs->root_cluster;
@@ -280,7 +280,7 @@ static int bad_name(unsigned char *name)
 
 static void drop_file(DOS_FS *fs,DOS_FILE *file)
 {
-    unsigned long cluster;
+    uint32_t cluster;
 
     MODIFY(file,name[0],DELETED_FLAG);
     for (cluster = FSTART(file,fs); cluster > 0 && cluster <
@@ -290,10 +290,10 @@ static void drop_file(DOS_FS *fs,DOS_FILE *file)
 }
 
 
-static void truncate_file(DOS_FS *fs,DOS_FILE *file,unsigned long clusters)
+static void truncate_file(DOS_FS *fs,DOS_FILE *file, uint32_t clusters)
 {
     int deleting;
-    unsigned long walk,next,prev;
+    uint32_t walk, next, prev;
 
     walk = FSTART(file,fs);
     prev = 0;
@@ -311,7 +311,7 @@ static void truncate_file(DOS_FS *fs,DOS_FILE *file,unsigned long clusters)
 static void auto_rename(DOS_FILE *file)
 {
     DOS_FILE *first,*walk;
-    unsigned long int number;
+    uint32_t number;
 
     if (!file->offset) return;	/* cannot rename FAT32 root dir */
     first = file->parent ? file->parent->first : root;
@@ -403,7 +403,7 @@ static int check_file(DOS_FS *fs,DOS_FILE *file)
 {
     DOS_FILE *owner;
     int restart;
-    unsigned long expect,curr,this,clusters,prev,walk,clusters2;
+    uint32_t expect, curr, this, clusters, prev, walk, clusters2;
 
     if (file->dir_ent.attr & ATTR_DIR) {
         if (CF_LE_L(file->dir_ent.size)) {
@@ -414,8 +414,8 @@ static int check_file(DOS_FS *fs,DOS_FILE *file)
         if (file->parent && !strncmp(file->dir_ent.name,MSDOS_DOT,MSDOS_NAME)) {
             expect = FSTART(file->parent,fs);
             if (FSTART(file,fs) != expect) {
-                printf("%s\n  Start (%ld) does not point to parent (%ld)\n",
-                        path_name(file),FSTART(file,fs),expect);
+                printf("%s\n  Start (%u) does not point to parent (%u)\n",
+                        path_name(file), FSTART(file, fs), expect);
                 MODIFY_START(file,expect,fs);
             }
             return 0;
@@ -426,8 +426,8 @@ static int check_file(DOS_FS *fs,DOS_FILE *file)
             if (fs->root_cluster && expect == fs->root_cluster)
                 expect = 0;
             if (FSTART(file,fs) != expect) {
-                printf("%s\n  Start (%lu) does not point to .. (%lu)\n",
-                        path_name(file),FSTART(file,fs),expect);
+                printf("%s\n  Start (%u) does not point to .. (%u)\n",
+                        path_name(file), FSTART(file, fs), expect);
                 MODIFY_START(file,expect,fs);
             }
             return 0;
@@ -440,8 +440,8 @@ static int check_file(DOS_FS *fs,DOS_FILE *file)
         }
     }
     if (FSTART(file,fs) >= fs->clusters+2) {
-        printf("%s\n  Start cluster beyond limit (%lu > %lu). Truncating file.\n",
-                path_name(file),FSTART(file,fs),fs->clusters+1);
+        printf("%s\n  Start cluster beyond limit (%u > %u). Truncating file.\n",
+                path_name(file), FSTART(file, fs), fs->clusters + 1);
         if (!file->offset)
             die( "Bad FAT32 root directory! (bad start cluster)\n" );
         MODIFY_START(file,0,fs);
@@ -450,8 +450,8 @@ static int check_file(DOS_FS *fs,DOS_FILE *file)
     for (curr = FSTART(file,fs) ? FSTART(file,fs) :
             -1; curr != -1; curr = next_cluster(fs,curr)) {
         if (!fs->fat[curr].value || bad_cluster(fs,curr)) {
-            printf("%s\n  Contains a %s cluster (%lu). Assuming EOF.\n",
-                    path_name(file),fs->fat[curr].value ? "bad" : "free",curr);
+            printf("%s\n  Contains a %s cluster (%u). Assuming EOF.\n",
+                    path_name(file), fs->fat[curr].value ? "bad" : "free", curr);
             if (prev) set_fat(fs,prev,-1);
             else if (!file->offset)
                 die( "FAT32 root dir starts with a bad cluster!" );
@@ -532,8 +532,10 @@ static int check_file(DOS_FS *fs,DOS_FILE *file)
     if (!(file->dir_ent.attr & ATTR_DIR) && CF_LE_L(file->dir_ent.size) >
             (unsigned long long)clusters*fs->cluster_size) {
         printf("%s\n  File size is %u bytes, cluster chain length is %llu bytes."
-                "\n  Truncating file to %lu bytes.\n",path_name(file),CF_LE_L(file->
-                    dir_ent.size),(unsigned long long)clusters*fs->cluster_size,(unsigned long long)clusters*fs->cluster_size);
+                "\n  Truncating file to %llu bytes.\n",
+                path_name(file), CF_LE_L(file->dir_ent.size),
+                (unsigned long long)clusters * fs->cluster_size,
+                (unsigned long long)clusters * fs->cluster_size);
         MODIFY(file,size,CT_LE_L((unsigned long long)clusters*fs->cluster_size));
     }
     return 0;
@@ -681,7 +683,7 @@ static int check_dir(DOS_FS *fs,DOS_FILE **root,int dots)
 static void test_file(DOS_FS *fs,DOS_FILE *file,int read_test)
 {
     DOS_FILE *owner;
-    unsigned long walk,prev,clusters,next_clu;
+    uint32_t walk, prev, clusters, next_clu;
 
     prev = clusters = 0;
     for (walk = FSTART(file,fs); walk > 0 && walk < fs->clusters+2;
@@ -689,9 +691,9 @@ static void test_file(DOS_FS *fs,DOS_FILE *file,int read_test)
         next_clu = next_cluster(fs,walk);
         if ((owner = get_owner(fs,walk))) {
             if (owner == file) {
-                printf("%s\n  Circular cluster chain. Truncating to %lu "
-                        "cluster%s.\n",path_name(file),clusters,clusters == 1 ? "" :
-                        "s");
+                printf("%s\n  Circular cluster chain. "
+                        "Truncating to %u cluster%s.\n",
+                        path_name(file), clusters, clusters == 1 ? "" : "s");
                 if (prev) set_fat(fs,prev,-1);
                 else if (!file->offset)
                     die( "Bad FAT32 root directory! (bad start cluster)\n" );
@@ -706,8 +708,8 @@ static void test_file(DOS_FS *fs,DOS_FILE *file,int read_test)
                 clusters++;
             }
             else {
-                printf("%s\n  Cluster %lu (%lu) is unreadable. Skipping it.\n",
-                        path_name(file),clusters,walk);
+                printf("%s\n  Cluster %u (%u) is unreadable. Skipping it.\n",
+                        path_name(file), clusters, walk);
                 if (prev) set_fat(fs,prev,next_cluster(fs,walk));
                 else MODIFY_START(file,next_cluster(fs,walk),fs);
                 set_fat(fs,walk,-2);
@@ -725,7 +727,7 @@ static void test_file(DOS_FS *fs,DOS_FILE *file,int read_test)
 
 static void undelete(DOS_FS *fs,DOS_FILE *file)
 {
-    unsigned long clusters,left,prev,walk;
+    uint32_t clusters, left, prev, walk;
 
     clusters = left = (CF_LE_L(file->dir_ent.size)+fs->cluster_size-1)/
         fs->cluster_size;
@@ -739,8 +741,8 @@ static void undelete(DOS_FS *fs,DOS_FILE *file)
     if (prev) set_fat(fs,prev,-1);
     else MODIFY_START(file,0,fs);
     if (left)
-        printf("Warning: Did only undelete %lu of %lu cluster%s.\n",clusters-left,
-                clusters,clusters == 1 ? "" : "s");
+        printf("Warning: Did only undelete %u of %u cluster%s.\n",
+                clusters - left, clusters, clusters == 1 ? "" : "s");
 
 }
 
@@ -811,7 +813,7 @@ static int scan_dir(DOS_FS *fs,DOS_FILE *this,FDSC **cp)
 {
     DOS_FILE **chain;
     int i;
-    unsigned long clu_num;
+    uint32_t clu_num;
 
     chain = &this->first;
     i = 0;

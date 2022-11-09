@@ -94,14 +94,14 @@ static void dump_boot(DOS_FS *fs,struct boot_sector *b,unsigned lss)
         printf("%10d root directory entries\n",fs->root_entries);
     }
     else {
-        printf( "Root directory start at cluster %lu (arbitrary size)\n",
+        printf("Root directory start at cluster %u (arbitrary size)\n",
                 fs->root_cluster);
     }
     printf("Data area starts at byte %llu (sector %llu)\n",
             (unsigned long long)fs->data_start,
             (unsigned long long)fs->data_start/lss);
-    printf("%10lu data clusters (%llu bytes)\n",fs->clusters,
-            (unsigned long long)fs->clusters*fs->cluster_size);
+    printf("%10u data clusters (%llu bytes)\n", fs->clusters,
+            (unsigned long long)fs->clusters * fs->cluster_size);
     printf("%u sectors/track, %u heads\n",CF_LE_W(b->secs_track),
             CF_LE_W(b->heads));
     printf("%10u hidden sectors\n",

@@ -18,7 +18,7 @@
 #include "fat.h"
 
 
-static void get_fat(FAT_ENTRY *entry,void *fat,unsigned long cluster,DOS_FS *fs)
+static void get_fat(FAT_ENTRY *entry, void *fat, uint32_t cluster, DOS_FS *fs)
 {
     unsigned char *ptr;
 
@@ -35,7 +35,7 @@ static void get_fat(FAT_ENTRY *entry,void *fat,unsigned long cluster,DOS_FS *fs)
             /* According to M$, the high 4 bits of a FAT32 entry are reserved and
              * are not part of the cluster number. So we cut them off. */
             {
-                unsigned long e = CF_LE_L(((unsigned int *) fat)[cluster]);
+                uint32_t e = CF_LE_L(((unsigned int *) fat)[cluster]);
                 entry->value = e & 0xfffffff;
                 entry->reserved = e >> 28;
             }
@@ -50,7 +50,7 @@ static void get_fat(FAT_ENTRY *entry,void *fat,unsigned long cluster,DOS_FS *fs)
 void read_fat(DOS_FS *fs)
 {
     int eff_size;
-    unsigned long i;
+    uint32_t i;
     void *first,*second = NULL;
     int first_ok,second_ok;
 
@@ -106,23 +106,23 @@ void read_fat(DOS_FS *fs)
     for (i = 2; i < fs->clusters+2; i++)
         if (fs->fat[i].value >= fs->clusters+2 &&
                 (fs->fat[i].value < FAT_MIN_BAD(fs))) {
-            printf("Cluster %ld out of range (%ld > %ld). Setting to EOF.\n",
-                    i-2,fs->fat[i].value,fs->clusters+2-1);
+            printf("Cluster %u out of range (%u > %u). Setting to EOF.\n",
+                    i - 2, fs->fat[i].value, fs->clusters + 2 - 1);
             set_fat(fs,i,-1);
         }
     free(first);
 }
 
 
-void set_fat(DOS_FS *fs,unsigned long cluster,unsigned long new)
+void set_fat(DOS_FS *fs, uint32_t cluster, uint32_t new)
 {
     unsigned char data[4];
     int size;
     loff_t offs;
 
-    if ((long)new == -1)
+    if ((int32_t)new == -1)
         new = FAT_EOF(fs);
-    else if ((long)new == -2)
+    else if ((int32_t)new == -2)
         new = FAT_BAD(fs);
     switch( fs->fat_bits ) {
         case 12:
@@ -140,15 +140,15 @@ void set_fat(DOS_FS *fs,unsigned long cluster,unsigned long new)
             break;
         case 16:
             offs = fs->fat_start+cluster*2;
-            *(unsigned short *) data = CT_LE_W(new);
+            *(uint16_t *)data = CT_LE_W(new);
             size = 2;
             break;
         case 32:
             offs = fs->fat_start+cluster*4;
             /* According to M$, the high 4 bits of a FAT32 entry are reserved and
              * are not part of the cluster number. So we never touch them. */
-            *(unsigned long *) data = CT_LE_L( (new & 0xfffffff) |
-                    (fs->fat[cluster].reserved << 28) );
+            *(uint32_t *)data =
+                CT_LE_L((new & 0xfffffff) | (fs->fat[cluster].reserved << 28));
             size = 4;
             break;
         default:
@@ -160,15 +160,15 @@ void set_fat(DOS_FS *fs,unsigned long cluster,unsigned long new)
 }
 
 
-int bad_cluster(DOS_FS *fs,unsigned long cluster)
+int bad_cluster(DOS_FS *fs, uint32_t cluster)
 {
     return FAT_IS_BAD(fs,fs->fat[cluster].value);
 }
 
 
-unsigned long next_cluster(DOS_FS *fs,unsigned long cluster)
+uint32_t next_cluster(DOS_FS *fs, uint32_t cluster)
 {
-    unsigned long value;
+    uint32_t value;
 
     value = fs->fat[cluster].value;
     if (FAT_IS_BAD(fs,value))
@@ -177,13 +177,13 @@ unsigned long next_cluster(DOS_FS *fs,unsigned long cluster)
 }
 
 
-loff_t cluster_start(DOS_FS *fs,unsigned long cluster)
+loff_t cluster_start(DOS_FS *fs, uint32_t cluster)
 {
     return fs->data_start+((loff_t)cluster-2)*(unsigned long long)fs->cluster_size;
 }
 
 
-void set_owner(DOS_FS *fs,unsigned long cluster,DOS_FILE *owner)
+void set_owner(DOS_FS *fs, uint32_t cluster, DOS_FILE *owner)
 {
     if (owner && fs->fat[cluster].owner)
         die("Internal error: attempt to change file owner");
@@ -191,7 +191,7 @@ void set_owner(DOS_FS *fs,unsigned long cluster,DOS_FILE *owner)
 }
 
 
-DOS_FILE *get_owner(DOS_FS *fs,unsigned long cluster)
+DOS_FILE *get_owner(DOS_FS *fs, uint32_t cluster)
 {
     return fs->fat[cluster].owner;
 }
@@ -199,14 +199,14 @@ DOS_FILE *get_owner(DOS_FS *fs,unsigned long cluster)
 
 void fix_bad(DOS_FS *fs)
 {
-    unsigned long i;
+    uint32_t i;
 
     if (verbose)
         printf("Checking for bad clusters.\n");
     for (i = 2; i < fs->clusters+2; i++)
         if (!get_owner(fs,i) && !FAT_IS_BAD(fs,fs->fat[i].value))
             if (!fs_test(cluster_start(fs,i),fs->cluster_size)) {
-                printf("Cluster %lu is unreadable.\n",i);
+                printf("Cluster %u is unreadable.\n", i);
                 set_fat(fs,i,-2);
             }
 }
@@ -215,7 +215,7 @@ void fix_bad(DOS_FS *fs)
 void reclaim_free(DOS_FS *fs)
 {
     int reclaimed;
-    unsigned long i;
+    uint32_t i;
 
     if (verbose)
         printf("Checking for unused clusters.\n");
@@ -235,8 +235,8 @@ void reclaim_free(DOS_FS *fs)
 static void tag_free(DOS_FS *fs,DOS_FILE *ptr)
 {
     DOS_FILE *owner;
-    int prev;
-    unsigned long i,walk;
+    uint32_t prev;
+    uint32_t i, walk;
 
     for (i = 2; i < fs->clusters+2; i++)
         if (fs->fat[i].value && !FAT_IS_BAD(fs,fs->fat[i].value) &&
@@ -261,7 +261,7 @@ void reclaim_file(DOS_FS *fs)
 {
     DOS_FILE dummy;
     int reclaimed,files,changed;
-    unsigned long i,next,walk;
+    uint32_t i, next, walk;
 
     if (verbose)
         printf("Reclaiming unconnected clusters.\n");
@@ -284,7 +284,7 @@ void reclaim_file(DOS_FS *fs)
                     die("Internal error: prev going below zero");
                 set_fat(fs,i,-1);
                 changed = 1;
-                printf("Broke cycle at cluster %lu in free chain.\n",i);
+                printf("Broke cycle at cluster %u in free chain.\n", i);
                 break;
             }
     }
@@ -313,10 +313,10 @@ void reclaim_file(DOS_FS *fs)
 }
 
 
-unsigned long update_free(DOS_FS *fs)
+uint32_t update_free(DOS_FS *fs)
 {
-    unsigned long i;
-    unsigned long free = 0;
+    uint32_t i;
+    uint32_t free = 0;
     int do_set = 0;
 
     for (i = 2; i < fs->clusters+2; i++)
@@ -330,8 +330,8 @@ unsigned long update_free(DOS_FS *fs)
         printf("Checking free cluster summary.\n");
     if (fs->free_clusters >= 0) {
         if (free != fs->free_clusters) {
-            printf( "Free cluster summary wrong (%ld vs. really %ld)\n",
-                    fs->free_clusters,free);
+            printf("Free cluster summary wrong (%u vs. really %u)\n",
+                    fs->free_clusters, free);
             if (interactive)
                 printf( "1) Correct\n2) Don't correct\n" );
             else printf( "  Auto-correcting.\n" );
@@ -340,7 +340,7 @@ unsigned long update_free(DOS_FS *fs)
         }
     }
     else {
-        printf( "Free cluster summary uninitialized (should be %ld)\n", free );
+        printf("Free cluster summary uninitialized (should be %u)\n", free);
         if (interactive)
             printf( "1) Set it\n2) Leave it uninitialized\n" );
         else printf( "  Auto-setting.\n" );

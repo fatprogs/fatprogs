@@ -79,12 +79,17 @@ static void check_atari( void )
 #endif
 }
 
+static void clean_fs(DOS_FS *fs)
+{
+    if (fs->label)
+        free(fs->label);
+}
 
 int main(int argc,char **argv)
 {
     DOS_FS fs;
     int rw,salvage_files,verify,c;
-    unsigned long free_clusters;
+    uint32_t free_clusters;
 
     rw = salvage_files = verify = 0;
     interactive = 1;
@@ -172,9 +177,10 @@ int main(int argc,char **argv)
             printf("Leaving file system unchanged.\n");
     }
 
-    printf( "%s: %u files, %lu/%lu clusters\n", argv[optind],
-            n_files, fs.clusters - free_clusters, fs.clusters );
+    printf("%s: %u files, %u/%u clusters\n", argv[optind], n_files,
+            fs.clusters - free_clusters, fs.clusters);
 
+    clean_fs(&fs);
     return fs_close(rw) ? 1 : 0;
 }
 

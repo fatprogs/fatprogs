@@ -14,6 +14,7 @@
 #define _LINUX_STRING_H_	/* hack to avoid inclusion of <linux/string.h>*/
 #define _LINUX_FS_H             /* hack to avoid inclusion of <linux/fs.h> */
 
+#include <stdint.h>
 # include <asm/types.h>
 # include <asm/byteorder.h>
 
@@ -143,10 +144,10 @@ typedef struct _dos_file {
 } DOS_FILE;
 
 typedef struct {
-    unsigned long value;
-    unsigned long reserved;
+    uint32_t value;
+    uint32_t reserved;
     DOS_FILE *owner;
-    int prev; /* number of previous clusters */
+    uint32_t prev; /* number of previous clusters */
 } FAT_ENTRY;
 
 typedef struct {
@@ -155,14 +156,14 @@ typedef struct {
     unsigned int fat_size; /* unit is bytes */
     unsigned int fat_bits; /* size of a FAT entry */
     unsigned int eff_fat_bits; /* # of used bits in a FAT entry */
-    unsigned long root_cluster; /* 0 for old-style root dir */
+    uint32_t root_cluster; /* 0 for old-style root dir */
     loff_t root_start;
     unsigned int root_entries;
     loff_t data_start;
     unsigned int cluster_size;
-    unsigned long clusters;
+    uint32_t clusters;  /* total number of data area clusters */
     loff_t fsinfo_start; /* 0 if not present */
-    long free_clusters;
+    uint32_t free_clusters;
     loff_t backupboot_start; /* 0 if not present */
     FAT_ENTRY *fat;
     char *label;
@@ -179,7 +180,7 @@ extern void *mem_queue;
 
 /* value to use as end-of-file marker */
 #define FAT_EOF(fs)	((atari_format ? 0xfff : 0xff8) | FAT_EXTD(fs))
-#define FAT_IS_EOF(fs,v) ((unsigned long)(v) >= (0xff8|FAT_EXTD(fs)))
+#define FAT_IS_EOF(fs,v) ((uint32_t)(v) >= (0xff8|FAT_EXTD(fs)))
 /* value to mark bad clusters */
 #define FAT_BAD(fs)	(0xff7 | FAT_EXTD(fs))
 /* range of values used for bad clusters */
