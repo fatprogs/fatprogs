@@ -301,6 +301,22 @@ static void read_fsinfo(DOS_FS *fs, struct boot_sector *b, int lss)
         fs->free_clusters = CF_LE_L(fsinfo.free_clusters);
 }
 
+static inline int is_valid_media(unsigned char media)
+{
+    return 0xf8 <= media || media == 0xf0;
+}
+
+static int is_valid_fat(DOS_FS *fs, struct boot_sector *b)
+{
+    unsigned short reserved_sector;
+
+    reserved_sector = CF_LE_W(b->reserved_cnt);
+    if (!reserved_sector || !b->nfats || !is_valid_media(b->media))
+        return 0;
+
+    return 1;
+}
+
 void read_boot(DOS_FS *fs)
 {
     struct boot_sector b;
@@ -312,14 +328,19 @@ void read_boot(DOS_FS *fs)
 
     fs_read(0, sizeof(b), &b);
 
+    if (!is_valid_fat(fs, &b)) {
+        exit(EXIT_NOT_SUPPORT);
+    }
+
     if (b.boot_sign != CT_LE_W(BOOT_SIGN)) {
         printf("Filesystem does not have FAT32 magic number(0x%d)\n", CF_LE_W(b.boot_sign));
         exit(EXIT_NOT_SUPPORT);
     }
 
     logical_sector_size = GET_UNALIGNED_W(b.sector_size);
-    if (!logical_sector_size) {
-        die("Logical sector size is zero.");
+    if (!is_power_of_2(logical_sector_size) || !is_power_of_2(b.sec_per_clus)) {
+        printf("Logical sector size is zero.");
+        exit(EXIT_NOT_SUPPORT);
     }
 
     fs->cluster_size = b.sec_per_clus * logical_sector_size;
@@ -327,8 +348,8 @@ void read_boot(DOS_FS *fs)
         die("Cluster size is zero.");
     }
 
-    if (b.nfats != 2 && b.nfats != 1) {
-        die("Currently, only 1 or 2 FATs are supported, not %d.", b.nfats);
+    if (b.nfats > 2) {
+        printf("Currently, only 1 or 2 FATs are supported, not %d.", b.nfats);
     }
 
     fs->nfats = b.nfats;

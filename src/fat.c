@@ -416,6 +416,8 @@ int bad_cluster(DOS_FS *fs, uint32_t cluster)
     return FAT_IS_BAD(fs, value);
 }
 
+/* After calling __next_cluster(), return value can include bad cluster
+ * So, should check if it is bad or not. */
 inline uint32_t __next_cluster(DOS_FS *fs, uint32_t cluster)
 {
     uint32_t next_clus;
@@ -516,6 +518,7 @@ void fix_bad(DOS_FS *fs)
                 clear_bitmap_occupied(fs, i);
             }
         }
+        /* what would I do here, if bad cluster? */
     }
 }
 

@@ -69,4 +69,9 @@ void clear_bit(unsigned int nr, unsigned long *p);
 int test_bit(unsigned int nr, unsigned long *p);
 void change_bit(unsigned int nr, unsigned long *p);
 
+static inline int is_power_of_2(unsigned long n)
+{
+    return (n != 0 && ((n & (n - 1)) == 0));
+}
+
 #endif
