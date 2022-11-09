@@ -77,11 +77,11 @@ static void dump_boot(DOS_FS *fs, struct boot_sector *b, unsigned lss)
         printf("Serial number 0x%x\n",
                 b->system_id[5] | (b->system_id[6] << 8) | (b->system_id[7] << 16));
     }
-    printf("Media byte 0x%02x (%s)\n", b->media,get_media_descr(b->media));
+    printf("Media byte 0x%02x (%s)\n", b->media, get_media_descr(b->media));
     printf("%10d bytes per logical sector\n", GET_UNALIGNED_W(b->sector_size));
     printf("%10d bytes per cluster\n", fs->cluster_size);
-    printf("%10d reserved sector%s\n", CF_LE_W(b->reserved),
-            CF_LE_W(b->reserved) == 1 ? "" : "s");
+    printf("%10d reserved sector%s\n", CF_LE_W(b->reserved_cnt),
+            CF_LE_W(b->reserved_cnt) == 1 ? "" : "s");
     printf("First FAT starts at byte %llu (sector %llu)\n",
             (unsigned long long)fs->fat_start,
             (unsigned long long)fs->fat_start/lss);
@@ -122,7 +122,7 @@ static void check_backup_boot(DOS_FS *fs, struct boot_sector *b, int lss)
     if (!fs->backupboot_start) {
 
         printf("There is no backup boot sector.\n");
-        if (CF_LE_W(b->reserved) < 3) {
+        if (CF_LE_W(b->reserved_cnt) < 3) {
             printf("And there is no space for creating one!\n");
             return;
         }
@@ -136,18 +136,18 @@ static void check_backup_boot(DOS_FS *fs, struct boot_sector *b, int lss)
             int bbs;
             /* The usual place for the backup boot sector is sector 6. Choose
              * that or the last reserved sector. */
-            if (CF_LE_W(b->reserved) >= 7 && CF_LE_W(b->info_sector) != 6)
+            if (CF_LE_W(b->reserved_cnt) >= 7 && CF_LE_W(b->fat32.info_sector) != 6)
                 bbs = 6;
             else {
-                bbs = CF_LE_W(b->reserved) - 1;
-                if (bbs == CF_LE_W(b->info_sector))
-                    --bbs; /* this is never 0, as we checked reserved >= 3! */
+                bbs = CF_LE_W(b->reserved_cnt) - 1;
+                if (bbs == CF_LE_W(b->fat32.info_sector))
+                    --bbs; /* this is never 0, as we checked reserved_cnt >= 3! */
             }
             fs->backupboot_start = bbs * lss;
-            b->backup_boot = CT_LE_W(bbs);
+            b->fat32.backup_boot = CT_LE_W(bbs);
             fs_write(fs->backupboot_start, sizeof(*b), b);
-            fs_write((off_t)offsetof(struct boot_sector, backup_boot),
-                    sizeof(b->backup_boot), &b->backup_boot);
+            fs_write((off_t)offsetof(struct boot_sector, fat32.backup_boot),
+                    sizeof(b->fat32.backup_boot), &b->fat32.backup_boot);
             printf("Created backup of boot sector in sector %d\n", bbs);
             return;
         }
@@ -202,20 +202,20 @@ static void check_backup_boot(DOS_FS *fs, struct boot_sector *b, int lss)
     }
 }
 
-static void init_fsinfo(struct info_sector *i)
+static void init_fsinfo(struct fsinfo_sector *i)
 {
-    i->magic = CT_LE_L(0x41615252);
-    i->signature = CT_LE_L(0x61417272);
+    i->magic = CT_LE_L(LEAD_SIGN);
+    i->signature = CT_LE_L(STRUCT_SIGN);
     i->free_clusters = CT_LE_L(-1);
     i->next_cluster = CT_LE_L(2);
-    i->boot_sign = CT_LE_W(0xaa55);
+    i->boot_sign = CT_LE_W(BOOT_SIGN);
 }
 
 static void read_fsinfo(DOS_FS *fs, struct boot_sector *b, int lss)
 {
-    struct info_sector i;
+    struct fsinfo_sector i;
 
-    if (!b->info_sector) {
+    if (!b->fat32.info_sector) {
         printf("No FSINFO sector\n");
 
         if (interactive)
@@ -228,21 +228,21 @@ static void read_fsinfo(DOS_FS *fs, struct boot_sector *b, int lss)
              * backup boot sector) */
             __u32 s;
 
-            for (s = 1; s < CF_LE_W(b->reserved); ++s) {
-                if (s != CF_LE_W(b->backup_boot))
+            for (s = 1; s < CF_LE_W(b->reserved_cnt); ++s) {
+                if (s != CF_LE_W(b->fat32.backup_boot))
                     break;
             }
 
-            if (s > 0 && s < CF_LE_W(b->reserved)) {
+            if (s > 0 && s < CF_LE_W(b->reserved_cnt)) {
                 init_fsinfo(&i);
                 fs_write((off_t)s * lss, sizeof(i), &i);
-                b->info_sector = CT_LE_W(s);
-                fs_write((off_t)offsetof(struct boot_sector, info_sector),
-                        sizeof(b->info_sector), &b->info_sector);
+                b->fat32.info_sector = CT_LE_W(s);
+                fs_write((off_t)offsetof(struct boot_sector, fat32.info_sector),
+                        sizeof(b->fat32.info_sector), &b->fat32.info_sector);
                 if (fs->backupboot_start)
                     fs_write(fs->backupboot_start +
-                            offsetof(struct boot_sector, info_sector),
-                            sizeof(b->info_sector), &b->info_sector);
+                            offsetof(struct boot_sector, fat32.info_sector),
+                            sizeof(b->fat32.info_sector), &b->fat32.info_sector);
             }
             else {
                 printf("No free reserved sector found -- "
@@ -254,25 +254,29 @@ static void read_fsinfo(DOS_FS *fs, struct boot_sector *b, int lss)
             return;
     }
 
-    fs->fsinfo_start = CF_LE_W(b->info_sector) * lss;
+    fs->fsinfo_start = CF_LE_W(b->fat32.info_sector) * lss;
     fs_read(fs->fsinfo_start, sizeof(i), &i);
 
-    if (i.magic != CT_LE_L(0x41615252) ||
-            i.signature != CT_LE_L(0x61417272) ||
-            i.boot_sign != CT_LE_W(0xaa55)) {
+    if (i.magic != CT_LE_L(LEAD_SIGN) ||
+            i.signature != CT_LE_L(STRUCT_SIGN) ||
+            i.boot_sign != CT_LE_W(BOOT_SIGN)) {
+
         printf("FSINFO sector has bad magic number(s):\n");
-        if (i.magic != CT_LE_L(0x41615252))
+
+        if (i.magic != CT_LE_L(LEAD_SIGN))
             printf("  Offset %llu: 0x%08x != expected 0x%08x\n",
-                    (unsigned long long)offsetof(struct info_sector, magic),
-                    CF_LE_L(i.magic), 0x41615252);
-        if (i.signature != CT_LE_L(0x61417272))
+                    (unsigned long long)offsetof(struct fsinfo_sector, magic),
+                    CF_LE_L(i.magic), LEAD_SIGN);
+
+        if (i.signature != CT_LE_L(STRUCT_SIGN))
             printf("  Offset %llu: 0x%08x != expected 0x%08x\n",
-                    (unsigned long long)offsetof(struct info_sector, signature),
-                    CF_LE_L(i.signature), 0x61417272);
-        if (i.boot_sign != CT_LE_W(0xaa55))
+                    (unsigned long long)offsetof(struct fsinfo_sector, signature),
+                    CF_LE_L(i.signature), STRUCT_SIGN);
+
+        if (i.boot_sign != CT_LE_W(BOOT_SIGN))
             printf("  Offset %llu: 0x%04x != expected 0x%04x\n",
-                    (unsigned long long)offsetof(struct info_sector, boot_sign),
-                    CF_LE_W(i.boot_sign), 0xaa55);
+                    (unsigned long long)offsetof(struct fsinfo_sector, boot_sign),
+                    CF_LE_W(i.boot_sign), BOOT_SIGN);
 
         if (interactive)
             printf("1) Correct\n2) Don't correct (FSINFO invalid then)\n");
@@ -298,6 +302,7 @@ void read_boot(DOS_FS *fs)
     unsigned short logical_sector_size, sectors;
     unsigned fat_length;
     off_t data_size;
+    struct volume_info *vi;
 
     fs_read(0, sizeof(b), &b);
     logical_sector_size = GET_UNALIGNED_W(b.sector_size);
@@ -310,7 +315,7 @@ void read_boot(DOS_FS *fs)
         die("Cluster size is zero.");
 
     if (b.fats != 2 && b.fats != 1)
-        die("Currently, only 1 or 2 FATs are supported, not %d.\n", b.fats);
+        die("Currently, only 1 or 2 FATs are supported, not %d.", b.fats);
 
     fs->nfats = b.fats;
     sectors = GET_UNALIGNED_W(b.sectors);
@@ -322,9 +327,9 @@ void read_boot(DOS_FS *fs)
     fs_test((off_t)((total_sectors & ~1) - 1) * (off_t)logical_sector_size,
             logical_sector_size);
     fat_length = CF_LE_W(b.fat_length) ?
-        CF_LE_W(b.fat_length) : CF_LE_L(b.fat32_length);
-    fs->fat_start = (off_t)CF_LE_W(b.reserved) * logical_sector_size;
-    fs->root_start = ((off_t)CF_LE_W(b.reserved)+b.fats*fat_length)*
+        CF_LE_W(b.fat_length) : CF_LE_L(b.fat32.fat32_length);
+    fs->fat_start = (off_t)CF_LE_W(b.reserved_cnt) * logical_sector_size;
+    fs->root_start = ((off_t)CF_LE_W(b.reserved_cnt) + b.fats * fat_length) *
         logical_sector_size;
     fs->root_entries = GET_UNALIGNED_W(b.dir_entries);
     fs->data_start = fs->root_start +
@@ -335,9 +340,9 @@ void read_boot(DOS_FS *fs)
     fs->fsinfo_start = 0;   /* no FSINFO structure */
     fs->free_clusters = -1; /* unknown */
 
-    if (!b.fat_length && b.fat32_length) {
+    if (!b.fat_length && b.fat32.fat32_length) {
         fs->fat_bits = 32;
-        fs->root_cluster = CF_LE_L(b.root_cluster);
+        fs->root_cluster = CF_LE_L(b.fat32.root_cluster);
         if (!fs->root_cluster && fs->root_entries)
             /* M$ hasn't specified this, but it looks reasonable: If
              * root_cluster is 0 but there is a separate root dir
@@ -353,7 +358,7 @@ void read_boot(DOS_FS *fs)
                     "a separate root dir\n"
                     "  area is defined. Cannot fix this easily.\n");
 
-        fs->backupboot_start = CF_LE_W(b.backup_boot) * logical_sector_size;
+        fs->backupboot_start = CF_LE_W(b.fat32.backup_boot) * logical_sector_size;
         check_backup_boot(fs, &b, logical_sector_size);
 
         read_fsinfo(fs, &b, logical_sector_size);
@@ -386,29 +391,31 @@ void read_boot(DOS_FS *fs)
 
     fs->label = calloc(12, sizeof (__u8));
     if (fs->fat_bits == 12 || fs->fat_bits == 16) {
-        struct boot_sector_16 *b16 = (struct boot_sector_16 *)&b;
-        if (b16->extended_sig == 0x29)
-            memmove(fs->label, b16->label, 11);
-        else
-            fs->label = NULL;
-        fs->fat_state = b16->state;
+        vi = &b.oldfat.vi;
     } else if (fs->fat_bits == 32) {
-        if (b.extended_sig == 0x29)
-            memmove(fs->label, &b.label, 11);
-        else
-            fs->label = NULL;
-        fs->fat_state = b.state;
-    }
+        vi = &b.fat32.vi;
+    } else
+        die("Can't find fat type");
+
+    if (vi->extended_sig == MSDOS_EXT_SIGN)
+        memmove(fs->label, vi->label, LEN_VOLUME_LABEL);
+    else
+        fs->label = NULL;
+
+    fs->fat_state = vi->state;
 
     if (fs->clusters > ((unsigned long long)fs->fat_size * 8 / fs->fat_bits) - 2)
         die("File system has %d clusters but only space for %d FAT entries.",
                 fs->clusters,
                 ((unsigned long long)fs->fat_size * 8 / fs->fat_bits) - 2);
+
     if (!fs->root_entries && !fs->root_cluster)
         die("Root directory has zero size.");
+
     if (fs->root_entries & (MSDOS_DPS - 1))
         die("Root directory (%d entries) doesn't span an integral number of "
                 "sectors.", fs->root_entries);
+
     if (logical_sector_size & (SECTOR_SIZE - 1))
         die("Logical sector size (%d bytes) is not a multiple of the physical "
                 "sector size.", logical_sector_size);

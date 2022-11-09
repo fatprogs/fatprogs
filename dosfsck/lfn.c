@@ -14,7 +14,7 @@
 #include "lfn.h"
 #include "file.h"
 
-typedef struct {
+typedef struct lfn_entry {
     __u8    id;		/* sequence number for slot */
     __u8    name0_4[10];	/* first 5 characters in name */
     __u8    attr;		/* attribute byte */
@@ -23,7 +23,7 @@ typedef struct {
     __u8    name5_10[12];	/* 6 more characters in name */
     __u16   start;		/* starting cluster number, 0 in long slots */
     __u8    name11_12[4];	/* last 2 characters in name */
-} LFN_ENT;
+} __attribute__ ((packed)) LFN_ENT;
 
 #define LFN_ID_START	0x40
 #define LFN_ID_SLOTMASK	0x1f

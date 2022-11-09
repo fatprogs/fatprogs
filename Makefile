@@ -2,14 +2,15 @@
 # Makefile for dosfstools (mkdosfs and dosfsck)
 #
 
+TOPDIR := $(shell pwd)
+
 CC = gcc
 CPP = $(CC) -E
 OPTFLAGS = -O2 -fomit-frame-pointer -D_FILE_OFFSET_BITS=64
 WARNFLAGS = -Wall
 DEBUGFLAGS =
-CFLAGS = $(OPTFLAGS) $(WARNFLAGS) $(DEBUGFLAGS)
+CFLAGS = $(OPTFLAGS) $(WARNFLAGS) $(DEBUGFLAGS) -I$(TOPDIR)/include
 LDFLAGS =
-#LDFLAGS = -fsanitize=address
 
 PREFIX =
 SBINDIR = $(PREFIX)/sbin

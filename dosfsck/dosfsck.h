@@ -14,28 +14,9 @@
 #define _LINUX_FS_H             /* hack to avoid inclusion of <linux/fs.h> */
 
 #include <stdint.h>
-# include <asm/types.h>
-# include <asm/byteorder.h>
+#include <asm/types.h>
 
-#include <linux/msdos_fs.h>
-
-#undef CF_LE_W
-#undef CF_LE_L
-#undef CT_LE_W
-#undef CT_LE_L
-
-#if __BYTE_ORDER == __BIG_ENDIAN
-#include <byteswap.h>
-#define CF_LE_W(v) bswap_16(v)
-#define CF_LE_L(v) bswap_32(v)
-#define CT_LE_W(v) CF_LE_W(v)
-#define CT_LE_L(v) CF_LE_L(v)
-#else
-#define CF_LE_W(v) (v)
-#define CF_LE_L(v) (v)
-#define CT_LE_W(v) (v)
-#define CT_LE_L(v) (v)
-#endif /* __BIG_ENDIAN */
+#include "dosfs.h"
 
 #define VFAT_LN_ATTR (ATTR_RO | ATTR_HIDDEN | ATTR_SYS | ATTR_VOLUME)
 #define VFAT_LN_ATTR_MASK \
@@ -44,108 +25,10 @@
 #define IS_LFN_ENT(attr) (((attr) & VFAT_LN_ATTR_MASK) == VFAT_LN_ATTR)
 #define IS_VOLUME_LABEL(attr) ((attr) & ATTR_VOLUME)
 
-#define LABEL_NONAME    "NO NAME    "
-#define LABEL_EMPTY     "           "
-#define LEN_VOLUME_LABEL    MSDOS_NAME
-#define LEN_FILE_NAME       MSDOS_NAME  /* total 8.3 file size(8 + 3) */
-#define LEN_FILE_BASE   8
-#define LEN_FILE_EXT    3           /* file extension size */
-
 #define FAT32_DIRTY_BIT_MASK    0x8000000
 #define FAT16_DIRTY_BIT_MASK    0x8000
 
-/* ++roman: Use own definition of boot sector structure -- the kernel headers'
- * name for it is msdos_boot_sector in 2.0 and fat_boot_sector in 2.1 ... */
-struct boot_sector {
-    __u8	ignored[3];	/* Boot strap short or near jump */
-    __u8	system_id[8];	/* Name - can be used to special case
-                               partition manager volumes */
-    __u8	sector_size[2];	/* bytes per logical sector */
-    __u8	cluster_size;	/* sectors/cluster */
-    __u16	reserved;	/* reserved sectors */
-    __u8	fats;		/* number of FATs */
-    __u8	dir_entries[2];	/* root directory entries */
-    __u8	sectors[2];	/* number of sectors */
-    __u8	media;		/* media code (unused) */
-    __u16	fat_length;	/* sectors/FAT */
-    __u16	secs_track;	/* sectors per track */
-    __u16	heads;		/* number of heads */
-    __u32	hidden;		/* hidden sectors (unused) */
-    __u32	total_sect;	/* number of sectors (if sectors == 0) */
-
-    /* The following fields are only used by FAT32 */
-    __u32	fat32_length;	/* sectors/FAT */
-    __u16	flags;		/* bit 8: fat mirroring, low 4: active fat */
-    __u8	version[2];	/* major, minor filesystem version */
-    __u32	root_cluster;	/* first cluster in root directory */
-    __u16	info_sector;	/* filesystem info sector */
-    __u16	backup_boot;	/* backup boot sector */
-    __u8 	reserved2[12];	/* Unused */
-
-    __u8        drive_number;   /* Logical Drive Number */
-    __u8        state;      /* Undocumented, but used for mount state */
-    __u8        extended_sig;   /* Extended Signature (0x29) */
-    __u32       serial;         /* Serial number */
-    __u8        label[LEN_VOLUME_LABEL];    /* FS label */
-    __u8        fs_type[8];     /* FS Type */
-
-    /* fill up to 512 bytes */
-    __u8	junk[422];
-} __attribute__ ((packed));
-
-struct boot_sector_16 {
-    __u8	ignored[3];	/* Boot strap short or near jump */
-    __u8	system_id[8];	/* Name - can be used to special case
-                               partition manager volumes */
-    __u8	sector_size[2];	/* bytes per logical sector */
-    __u8	cluster_size;	/* sectors/cluster */
-    __u16	reserved;	/* reserved sectors */
-    __u8	fats;		/* number of FATs */
-    __u8	dir_entries[2];	/* root directory entries */
-    __u8	sectors[2];	/* number of sectors */
-    __u8	media;		/* media code (unused) */
-    __u16	fat_length;	/* sectors/FAT */
-    __u16	secs_track;	/* sectors per track */
-    __u16	heads;		/* number of heads */
-    __u32	hidden;		/* hidden sectors (unused) */
-    __u32	total_sect;	/* number of sectors (if sectors == 0) */
-
-    __u8        drive_number;   /* Logical Drive Number */
-    __u8        state;      /* Undocumented, but used for mount state */
-
-    __u8        extended_sig;   /* Extended Signature (0x29) */
-    __u32       serial;         /* Serial number */
-    __u8        label[LEN_VOLUME_LABEL];      /* FS label */
-    __u8        fs_type[8];     /* FS Type */
-
-    /* fill up to 512 bytes */
-    __u8	junk[450];
-} __attribute__ ((packed));
-
-struct info_sector {
-    __u32	magic;		/* Magic for info sector ('RRaA') */
-    __u8	junk[0x1dc];
-    __u32	reserved1;	/* Nothing as far as I can tell */
-    __u32	signature;	/* 0x61417272 ('rrAa') */
-    __u32	free_clusters;	/* Free cluster count.  -1 if unknown */
-    __u32	next_cluster;	/* Most recently allocated cluster. */
-    __u32	reserved2[3];
-    __u16	reserved3;
-    __u16	boot_sign;
-};
-
-typedef struct {
-    __u8	name[LEN_FILE_NAME]; /* name and extension */
-    __u8	attr;		/* attribute bits */
-    __u8	lcase;		/* Case for base and extension */
-    __u8	ctime_ms;	/* Creation time, milliseconds */
-    __u16	ctime;		/* Creation time */
-    __u16	cdate;		/* Creation date */
-    __u16	adate;		/* Last access date */
-    __u16	starthi;	/* High 16 bits of cluster in FAT32 */
-    __u16	time, date, start;  /* time, date and first cluster */
-    __u32	size;		/* file size (in bytes) */
-} DIR_ENT;
+typedef struct dir_entry DIR_ENT;
 
 typedef struct _dos_file {
     DIR_ENT dir_ent;

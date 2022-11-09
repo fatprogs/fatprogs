@@ -55,8 +55,8 @@ static DOS_FILE *root;
             p->dir_ent.start = CT_LE_W(__v&0xffff);				\
             p->dir_ent.starthi = CT_LE_W(__v >> 16);				\
             __v = CT_LE_L(__v);						\
-            fs_write((loff_t)offsetof(struct boot_sector, root_cluster),	\
-                    sizeof(((struct boot_sector *)0)->root_cluster),	\
+            fs_write((loff_t)offsetof(struct boot_sector, fat32.root_cluster),	\
+                    sizeof(((struct boot_sector *)0)->fat32.root_cluster),	\
                     &__v);							\
         }									\
         else {								\
@@ -419,7 +419,7 @@ static int __find_lfn(DOS_FS *fs, DOS_FILE *parent, loff_t offset,
         return 0;
     }
 
-    if (memcmp(de.name, file->dir_ent.name, 11) == 0 &&
+    if (memcmp(de.name, file->dir_ent.name, LEN_FILE_NAME) == 0 &&
             offset == file->offset && lfn_exist()) {
         /* found */
         return 1;
@@ -1559,32 +1559,33 @@ void write_root_label(DOS_FS *fs, char *label, label_t **head, label_t **last)
 void write_boot_label(DOS_FS *fs, char *label)
 {
     struct boot_sector b;
-    struct boot_sector_16 b16;
+    struct volume_info *vi = NULL;
+    char *fs_type = NULL;
+
+    fs_read(0, sizeof(b), &b);
 
     if (fs->fat_bits == 12 || fs->fat_bits == 16) {
-        fs_read(0, sizeof(b16), &b16);
-        if (b16.extended_sig != 0x29) {
-            b16.extended_sig = 0x29;
-            b16.serial = 0;
-            memcpy(b16.fs_type,
-                    fs->fat_bits == 12 ? "FAT12   " : "FAT16   ", 8);
-        }
-        memcpy(b16.label, label, LEN_VOLUME_LABEL);
-        fs_write(0, sizeof(b16), &b16);
+        vi = &b.oldfat.vi;
+        fs_type = fs->fat_bits == 12 ? MSDOS_FAT12_SIGN: MSDOS_FAT16_SIGN;
     }
     else if (fs->fat_bits == 32) {
-        fs_read(0, sizeof(b), &b);
-        if (b.extended_sig != 0x29) {
-            b.extended_sig = 0x29;
-            b.serial = 0;
-            memcpy(b.fs_type, "FAT32   ", 8);
-        }
-        memcpy(b.label, label, LEN_VOLUME_LABEL);
-        fs_write(0, sizeof(b), &b);
-
-        if (fs->backupboot_start)
-            fs_write(fs->backupboot_start, sizeof(b), &b);
+        vi = &b.fat32.vi;
+        fs_type = MSDOS_FAT32_SIGN;
     }
+    else
+        die("Can't find fat fs type");
+
+    if (vi->extended_sig != MSDOS_EXT_SIGN) {
+        vi->extended_sig = MSDOS_EXT_SIGN;
+        memset(vi->volume_id, 0, 4);
+        memcpy(vi->fs_type, fs_type, 8);
+    }
+    memcpy(vi->label, label, LEN_VOLUME_LABEL);
+    fs_write(0, sizeof(b), &b);
+
+    if (fs->backupboot_start)
+        fs_write(fs->backupboot_start, sizeof(b), &b);
+
 }
 
 /**
@@ -2280,16 +2281,18 @@ void clean_dirty_flag(DOS_FS *fs)
 {
     FAT_ENTRY fat_2nd;
     uint32_t dirty_mask;
-    struct boot_sector b32;
-    struct boot_sector_16 b16;
+    struct boot_sector b;
+    struct volume_info *vi = NULL;
+
+    fs_read(0, sizeof(b), &b);
 
     if (fs->fat_bits == 32) {
         dirty_mask = FAT32_DIRTY_BIT_MASK;
-        fs_read(0, sizeof(b32), &b32);
+        vi = &b.fat32.vi;
     }
     else {
         dirty_mask = FAT16_DIRTY_BIT_MASK;
-        fs_read(0, sizeof(b16), &b16);
+        vi = &b.oldfat.vi;
     }
 
     get_fat(fs, 1, &fat_2nd);
@@ -2305,14 +2308,8 @@ void clean_dirty_flag(DOS_FS *fs)
         switch (interactive ? get_key("12", "?") : '1') {
             case '1':
                 if (fs->fat_state & FAT_STATE_DIRTY) {
-                    if (fs->fat_bits == 32) {
-                        b32.state &= ~FAT_STATE_DIRTY;
-                        fs_write(0, sizeof(b32), &b32);
-                    }
-                    else if (fs->fat_bits == 16) {
-                        b16.state &= ~FAT_STATE_DIRTY;
-                        fs_write(0, sizeof(b16), &b16);
-                    }
+                    vi->state &= ~FAT_STATE_DIRTY;
+                    fs_write(0, sizeof(b), &b);
                 }
 
                 if (!(fat_2nd.value & dirty_mask)) {

@@ -89,7 +89,7 @@ void fs_read(loff_t pos, int size, void *data)
     CHANGE *walk;
     int got;
 
-    if (llseek(fd, pos, 0) != pos)
+    if (llseek(fd, pos, SEEK_SET) != pos)
         pdie("Seek to %lld", pos);
 
     if ((got = read(fd, data, size)) < 0)

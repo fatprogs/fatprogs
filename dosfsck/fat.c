@@ -426,7 +426,7 @@ uint32_t update_free(DOS_FS *fs)
     if (do_set) {
         fs->free_clusters = free;
         free = CT_LE_L(free);
-        fs_write(fs->fsinfo_start + offsetof(struct info_sector, free_clusters),
+        fs_write(fs->fsinfo_start + offsetof(struct fsinfo_sector, free_clusters),
                 sizeof(free), &free);
     }
 
