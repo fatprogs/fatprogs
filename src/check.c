@@ -759,7 +759,7 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
             /* already bit of curr is set in fs->real_bitmap */
             int do_trunc = 0;
 
-            printf("%s(second) share other file(first)'s clusters\n",
+            printf("%s(second)\n  Share other file(first)'s clusters\n",
                     path_name(file));
             clusters2 = 0;
 
@@ -840,8 +840,15 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
 truncate_second:
                 if (prev)
                     set_fat(fs, prev, -1);
-                else
+                else {
+                    /* Make start cluster to 0.
+                     * If file is directory, then remove file. */
                     MODIFY_START(file, 0, fs);
+                    if (file->dir_ent.attr & ATTR_DIR) {
+                        drop_file(fs, file);
+                        break;
+                    }
+                }
                 break;
             }
         }
