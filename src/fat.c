@@ -31,15 +31,12 @@ void set_exclusive_bitmap(DOS_FS *fs)
      * real_bitmap : set by traversing file tree */
 
     /* After exclusive OR operation,
-     * bits represent orphaned clusters */
+     * real_bitmap represent orphaned clusters and
+     * bitmap represent previous real_bitmap which is set by traversing */
     for (i = 0; i < (fs->bitmap_size / sizeof(long)); i++) {
         fs->real_bitmap[i] ^= fs->bitmap[i];
+        fs->bitmap[i] ^= fs->real_bitmap[i];
     }
-
-    memset(fs->bitmap, 0, fs->bitmap_size);
-
-    /* bitmap : read from disk --> zero cleared for reclaimed cluster
-     * real_bitmap : represent orphan clusters set */
 }
 
 static void init_fat_cache(DOS_FS *fs)
@@ -620,8 +617,9 @@ void reclaim_file(DOS_FS *fs)
     if (verbose)
         printf("Reclaiming unconnected clusters.\n");
 
-    /* Remove checked cluster,
-     * After function called, remained bitmap represent orphan clusters */
+    /* Remove checked cluster bits. After function called,
+     * remained bit in real_bitmap represent orphan clusters.
+     * And bitmap preserves previous real_bitmap */
     set_exclusive_bitmap(fs);
 
     /* TODO: below 'for' loop can be moved into after find_start_clusters() 'for' loop */
@@ -630,7 +628,7 @@ void reclaim_file(DOS_FS *fs)
     for (i = FAT_START_ENT; i < max_clus_num; i++) {
         uint32_t value;
 
-        /* TODO: check 64bit at once */
+        /* check 64bit at once */
         if (i % BITS_PER_LONG == 0 && fs->real_bitmap[i / BITS_PER_LONG] == 0) {
             i = ((i / BITS_PER_LONG) * BITS_PER_LONG) + BITS_PER_LONG - 1;
             continue;
@@ -647,10 +645,14 @@ void reclaim_file(DOS_FS *fs)
             /* In case that i's next cluster is already in other cluster chain
              * or i's next cluster has wrong cluster value */
             if (!test_bit(next, fs->real_bitmap) ||
+                    test_bit(next, fs->bitmap) ||
                     !value || FAT_IS_BAD(fs, value))
                 set_fat(fs, i, -1);
         }
     }
+
+    /* bitmap : zero cleared for reclaimed cluster */
+    memset(fs->bitmap, 0, fs->bitmap_size);
 
     /* after find_start_clusters(),
      * real_bitmap represent orphan's start cluster */
