@@ -55,6 +55,7 @@ void read_fat(DOS_FS *fs)
     int bitmap_size;
     int first_ok;
     int second_ok;
+    int clus_size;  /* cluster size (bytes) */
     int cpr;    /* number of cluster per read size */
     int total_cluster = 0;
     fat_select_t flag = FAT_NONE;
@@ -67,7 +68,8 @@ void read_fat(DOS_FS *fs)
     fat_size = ((fs->clusters + 2ULL) * fs->fat_bits + 7) / BITS_PER_BYTE;
     fs->bitmap_size = bitmap_size = (fat_size + 7) / BITS_PER_BYTE;
 
-    read_size = min(DEFAULT_FAT_BUF, fat_size);
+    clus_size = fs->fat_bits / BITS_PER_BYTE;
+    read_size = min(FAT_BUF, fat_size);
     first_fat = alloc_mem(read_size);
     if (fs->nfats > 1) {
         second_fat = alloc_mem(read_size);
@@ -160,7 +162,7 @@ void read_fat(DOS_FS *fs)
             }
         }
 
-        cpr = read_size / fs->fat_bits;
+        cpr = read_size / clus_size;
         for (i = start; i < cpr; i++) {
             get_fat(fs, total_cluster + i, &clus_num);
             if (!clus_num)
