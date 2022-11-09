@@ -178,7 +178,9 @@ void set_fat(DOS_FS *fs, uint32_t cluster, uint32_t new)
 
     fs->fat[cluster].value = new;
     fs_write(offs, size, &data);
-    fs_write(offs + fs->fat_size, size, &data);
+    if (fs->nfats > 1) {
+        fs_write(offs + fs->fat_size, size, &data);
+    }
 }
 
 int bad_cluster(DOS_FS *fs, uint32_t cluster)
