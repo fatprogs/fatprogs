@@ -728,7 +728,12 @@ static void test_file(DOS_FS *fs,DOS_FILE *file,int read_test)
             break;
         }
         if (bad_cluster(fs,walk)) break;
-        if (read_test) {
+
+        if (!read_test) {
+            prev = walk;
+            clusters++;
+        }
+        else { /* if (read_test) */
             if (fs_test(cluster_start(fs,walk),fs->cluster_size)) {
                 prev = walk;
                 clusters++;
