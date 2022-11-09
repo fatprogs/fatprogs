@@ -219,6 +219,8 @@ void lfn_add_slot(DIR_ENT *de, loff_t dir_offset)
         printf("Long filename fragment \"%s\" found outside a LFN "
                 "sequence.\n  (Maybe the start bit is missing on the "
                 "last fragment)\n", part);
+        free(part);
+
         if (interactive) {
             printf("1: Delete fragment\n"
                     "2: Leave it as it is.\n"
@@ -491,6 +493,8 @@ void lfn_check_orphaned(void)
 
     long_name = CNV_PARTS_SO_FAR();
     printf("Orphaned long file name part \"%s\"\n", long_name);
+    free(long_name);
+
     if (interactive)
         printf("1: Delete.\n"
                "2: Leave it.\n");
@@ -503,6 +507,38 @@ void lfn_check_orphaned(void)
     lfn_reset();
 }
 
+void lfn_remove(void)
+{
+    clear_lfn_slots(0, lfn_parts - 1);
+    lfn_reset();
+}
+
+void scan_lfn(DIR_ENT *de, loff_t dir_offset)
+{
+    LFN_ENT *lfn_ent = (LFN_ENT *)de;
+    int slot = lfn_ent->id & LFN_ID_SLOTMASK;
+    unsigned int offset;
+
+    if (lfn_slot == 0)
+        lfn_check_orphaned();
+
+    if (lfn_ent->id & LFN_ID_START && slot != 0) {
+        lfn_slot = slot;
+        lfn_checksum = lfn_ent->alias_checksum;
+        lfn_unicode = alloc((lfn_slot * CHARS_PER_LFN + 1) * 2);
+        lfn_offsets = alloc(lfn_slot * sizeof(loff_t));
+        lfn_parts = 0;
+    }
+
+    if (lfn_slot != -1) {
+        lfn_slot--;
+        offset = lfn_slot * CHARS_PER_LFN * 2;
+        copy_lfn_part((char *)(lfn_unicode + offset), lfn_ent);
+        if (lfn_ent->id & LFN_ID_START)
+            lfn_unicode[offset + 26] = lfn_unicode[offset + 27] = 0;
+        lfn_offsets[lfn_parts++] = dir_offset;
+    }
+}
 /* Local Variables: */
 /* tab-width: 8     */
 /* End:             */

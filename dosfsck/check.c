@@ -353,7 +353,76 @@ static void truncate_file(DOS_FS *fs, DOS_FILE *file, uint32_t clusters)
     }
 }
 
-static void auto_rename(DOS_FILE *file)
+/* return 1 find file lfn name in parent entry,
+ * else return 0 */
+static int __find_lfn(DOS_FS *fs, DOS_FILE *parent, loff_t offset,
+        DOS_FILE *file)
+{
+    DIR_ENT de;
+
+    if (!offset) {
+        return 0;
+    }
+
+    fs_read(offset, sizeof(DIR_ENT), &de);
+
+    if (IS_FREE(de.name)) {
+        lfn_check_orphaned();
+    }
+
+    if (de.attr == VFAT_LN_ATTR) {
+        scan_lfn(&de, offset);
+        return 0;
+    }
+
+    if (memcmp(de.name, file->dir_ent.name, 11) == 0) {
+        /* found */
+        return 1;
+    }
+
+    lfn_reset();
+    return 0;
+}
+
+static int find_lfn(DOS_FS *fs, DOS_FILE *parent, DOS_FILE *file)
+{
+    uint32_t clus_num;
+    unsigned int clus_size;
+    loff_t offset = 0;
+
+    clus_num = FSTART(parent, fs);
+    clus_size = fs->cluster_size;
+
+    while (clus_num > 0 && clus_num != -1) {
+        if (__find_lfn(fs, parent, cluster_start(fs, clus_num) + offset, file))
+            /* found */
+            return 1;
+
+        offset += sizeof(DIR_ENT);
+        offset %= clus_size;
+        if (!(offset % clus_size))
+            clus_num = next_cluster(fs, clus_num);
+    }
+
+    return 0;
+}
+
+void remove_lfn(DOS_FS *fs, DOS_FILE *file)
+{
+    DOS_FILE *parent;
+
+    parent = file->parent;
+    if (!parent) {
+        printf("Can't remove lfn of root entry\n");
+        return;
+    }
+
+    if (find_lfn(fs, parent, file)) {
+        lfn_remove();
+    }
+}
+
+static void auto_rename(DOS_FS *fs, DOS_FILE *file)
 {
     DOS_FILE *first, *walk;
     uint32_t number;
@@ -378,6 +447,12 @@ static void auto_rename(DOS_FILE *file)
 
         if (!walk) {
             fs_write(file->offset, MSDOS_NAME, file->dir_ent.name);
+
+            /* remove lfn related with previous name */
+            if (file->lfn) {
+                remove_lfn(fs, file);
+                file->lfn = NULL;
+            }
             return;
         }
 
@@ -389,7 +464,7 @@ static void auto_rename(DOS_FILE *file)
     die("Can't generate a unique name.");
 }
 
-static void rename_file(DOS_FILE *file)
+static void rename_file(DOS_FS *fs, DOS_FILE *file)
 {
     unsigned char name[46];
     unsigned char *walk, *here;
@@ -415,6 +490,13 @@ static void rename_file(DOS_FILE *file)
 
             if (file_cvt(walk, file->dir_ent.name)) {
                 fs_write(file->offset, MSDOS_NAME, file->dir_ent.name);
+
+                /* remove lfn related with previous name */
+                if (file->lfn) {
+                    remove_lfn(fs, file);
+                    file->lfn = NULL;
+                }
+
                 return;
             }
         }
@@ -443,11 +525,11 @@ static int handle_dot(DOS_FS *fs, DOS_FILE *file, int dots)
                 drop_file(fs, file);
                 return 1;
             case '2':
-                auto_rename(file);
+                auto_rename(fs, file);
                 printf("  Renamed to %s\n", file_name(file->dir_ent.name));
                 return 0;
             case '3':
-                rename_file(file);
+                rename_file(fs, file);
                 return 0;
             case '4':
                 MODIFY(file, size, CT_LE_L(0));
@@ -531,14 +613,25 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
         }
 
         if (FSTART(file, fs) == 0) {
-            printf ("%s\n Start does point to root directory. Deleting dir. \n",
+            printf ("%s\n  Start does point to root directory. Deleting dir. \n",
                     path_name(file));
+            remove_lfn(fs, file);
             MODIFY(file, name[0], DELETED_FLAG);
             return 0;
         }
     }
 
     if (FSTART(file, fs) >= fs->clusters + 2) {
+        if (file->dir_ent.attr & ATTR_DIR) {
+            printf("%s\n  Directory start cluster beyond limit (%u > %u). "
+                    "Deleting dir.\n",
+                    path_name(file), FSTART(file, fs), fs->clusters + 1);
+            remove_lfn(fs, file);
+            MODIFY_START(file, 0, fs);
+            MODIFY(file, name[0], DELETED_FLAG);
+            return 0;
+        }
+
         printf("%s\n  Start cluster beyond limit (%u > %u). Truncating file.\n",
                 path_name(file), FSTART(file, fs), fs->clusters + 1);
         if (!file->offset)
@@ -771,11 +864,11 @@ static int check_dir(DOS_FS *fs, DOS_FILE **root, int dots)
                     walk = &(*walk)->next;
                     continue;
                 case '2':
-                    rename_file(*walk);
+                    rename_file(fs, *walk);
                     redo = 1;
                     break;
                 case '3':
-                    auto_rename(*walk);
+                    auto_rename(fs, *walk);
                     printf("  Renamed to %s\n",
                             file_name((*walk)->dir_ent.name));
                     break;
@@ -817,22 +910,22 @@ static int check_dir(DOS_FS *fs, DOS_FILE **root, int dots)
                             *scan = (*scan)->next;
                             continue;
                         case '3':
-                            rename_file(*walk);
+                            rename_file(fs, *walk);
                             printf("  Renamed to %s\n", path_name(*walk));
                             redo = 1;
                             break;
                         case '4':
-                            rename_file(*scan);
+                            rename_file(fs, *scan);
                             printf("  Renamed to %s\n", path_name(*walk));
                             redo = 1;
                             break;
                         case '5':
-                            auto_rename(*walk);
+                            auto_rename(fs, *walk);
                             printf("  Renamed to %s\n",
                                     file_name((*walk)->dir_ent.name));
                             break;
                         case '6':
-                            auto_rename(*scan);
+                            auto_rename(fs, *scan);
                             printf("  Renamed to %s\n",
                                     file_name((*scan)->dir_ent.name));
                             break;
