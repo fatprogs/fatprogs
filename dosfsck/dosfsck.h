@@ -51,6 +51,9 @@
 #define LEN_FILE_BASE   8
 #define LEN_FILE_EXT    3           /* file extension size */
 
+#define FAT32_DIRTY_BIT_MASK    0x8000000
+#define FAT16_DIRTY_BIT_MASK    0x8000
+
 /* ++roman: Use own definition of boot sector structure -- the kernel headers'
  * name for it is msdos_boot_sector in 2.0 and fat_boot_sector in 2.1 ... */
 struct boot_sector {
@@ -80,8 +83,7 @@ struct boot_sector {
     __u8 	reserved2[12];	/* Unused */
 
     __u8        drive_number;   /* Logical Drive Number */
-    __u8        reserved3;      /* Unused */
-
+    __u8        state;      /* Undocumented, but used for mount state */
     __u8        extended_sig;   /* Extended Signature (0x29) */
     __u32       serial;         /* Serial number */
     __u8        label[LEN_VOLUME_LABEL];    /* FS label */
@@ -109,7 +111,7 @@ struct boot_sector_16 {
     __u32	total_sect;	/* number of sectors (if sectors == 0) */
 
     __u8        drive_number;   /* Logical Drive Number */
-    __u8        reserved2;      /* Unused */
+    __u8        state;      /* Undocumented, but used for mount state */
 
     __u8        extended_sig;   /* Extended Signature (0x29) */
     __u32       serial;         /* Serial number */
@@ -167,6 +169,7 @@ typedef struct {
     unsigned int fat_size; /* unit is bytes */
     unsigned int fat_bits; /* size of a FAT entry */
     unsigned int eff_fat_bits; /* # of used bits in a FAT entry */
+    unsigned int fat_state; /* state of filesystem */
     uint32_t root_cluster; /* 0 for old-style root dir */
     loff_t root_start;
     unsigned int root_entries;

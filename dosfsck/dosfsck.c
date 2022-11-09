@@ -23,6 +23,8 @@
 #include "check.h"
 
 int interactive = 0, list = 0, test = 0, verbose = 0, write_immed = 0;
+int check_dirty = 0;
+int check_dirty_only = 0;
 int atari_format = 0;
 unsigned n_files = 0;
 void *mem_queue = NULL;
@@ -33,6 +35,7 @@ static void usage(char *name)
             "[-u path -u ...]\n%15sdevice\n", name, "");
     fprintf(stderr, "  -a       automatically repair the file system\n");
     fprintf(stderr, "  -A       toggle Atari file system format\n");
+    fprintf(stderr, "  -C       only check filesystem dirty flag(FAT32/16 only)\n");
     fprintf(stderr, "  -d path  drop that file\n");
     fprintf(stderr, "  -f       salvage unused chains to files\n");
     fprintf(stderr, "  -l       list path names\n");
@@ -79,6 +82,7 @@ int main(int argc, char **argv)
 {
     DOS_FS fs;
     int rw, salvage_files, verify, c;
+    int ret = 0;
     uint32_t free_clusters;
 
     salvage_files = verify = 0;
@@ -86,7 +90,7 @@ int main(int argc, char **argv)
     interactive = 1;
     check_atari();
 
-    while ((c = getopt(argc, argv, "Aad:flnrtu:vVwy")) != EOF) {
+    while ((c = getopt(argc, argv, "AaCd:flnrtu:vVwy")) != EOF) {
         switch (c) {
             case 'A': /* toggle Atari format */
                 atari_format = !atari_format;
@@ -96,6 +100,11 @@ int main(int argc, char **argv)
                 rw = 1;
                 interactive = 0;
                 salvage_files = 1;
+                break;
+            case 'C':
+                check_dirty = 1;
+                check_dirty_only = 1;
+                interactive = 0;
                 break;
             case 'd':
                 file_add(optarg, fdt_drop);
@@ -150,8 +159,28 @@ int main(int argc, char **argv)
     if (verify)
         printf("Starting check/repair pass.\n");
 
-    while (read_fat(&fs), scan_root(&fs))
-        qfree(&mem_queue);
+    do {
+        read_fat(&fs);
+
+        if (check_dirty &&
+                ((fs.fat_bits == 32) || (fs.fat_bits == 16))) {
+            if (check_dirty_flag(&fs)) {
+                if (check_dirty_only) {
+                    printf("  Just check filesystem dirty flag, exit!\n");
+                    exit(4);
+                }
+            }
+            else {
+                printf("  Filesystem dirty flag is clean. exit!\n");
+                exit(0);
+            }
+        }
+
+        ret = scan_root(&fs);
+        if (ret) {
+            qfree(&mem_queue);
+        }
+    } while (ret);
 
     if (test)
         fix_bad(&fs);
@@ -165,6 +194,8 @@ int main(int argc, char **argv)
 
     free_clusters = update_free(&fs);
     file_unused();
+
+    clean_dirty_flag(&fs);
     qfree(&mem_queue);
 
     if (verify) {
@@ -173,6 +204,7 @@ int main(int argc, char **argv)
         scan_root(&fs);
         check_volume_label(&fs);
         reclaim_free(&fs);
+        clean_dirty_flag(&fs);
         qfree(&mem_queue);
     }
 

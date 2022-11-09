@@ -2252,6 +2252,81 @@ static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
     return 0;
 }
 
+int check_dirty_flag(DOS_FS *fs)
+{
+    FAT_ENTRY fat_2nd;
+    uint32_t dirty_mask;
+
+    if (fs->fat_bits == 32) {
+        dirty_mask = FAT32_DIRTY_BIT_MASK;
+    }
+    else {
+        dirty_mask = FAT16_DIRTY_BIT_MASK;
+    }
+
+    /* read second value of FAT that has dirty flag */
+    get_fat(fs, 1, &fat_2nd);
+    if ((fs->fat_state & FAT_STATE_DIRTY) || !(fat_2nd.value & dirty_mask)) {
+        printf("FAT dirty flag is set.\n"
+                "  Filesystem might be shudowned unexpectedly,\n"
+                "  So filesystem may be corrupted.\n\n");
+        return -1;
+    }
+    printf("FAT dirty flag is clean.\n");
+    return 0;
+}
+
+void clean_dirty_flag(DOS_FS *fs)
+{
+    FAT_ENTRY fat_2nd;
+    uint32_t dirty_mask;
+    struct boot_sector b32;
+    struct boot_sector_16 b16;
+
+    if (fs->fat_bits == 32) {
+        dirty_mask = FAT32_DIRTY_BIT_MASK;
+        fs_read(0, sizeof(b32), &b32);
+    }
+    else {
+        dirty_mask = FAT16_DIRTY_BIT_MASK;
+        fs_read(0, sizeof(b16), &b16);
+    }
+
+    get_fat(fs, 1, &fat_2nd);
+
+    if ((fs->fat_state & FAT_STATE_DIRTY) || !(fat_2nd.value & dirty_mask)) {
+        if (interactive) {
+            printf("1) Clean dity flag\n"
+                    "2) Leave it\n");
+        }
+        else
+            printf("  Auto-cleaning dirty flag\n");
+
+        switch (interactive ? get_key("12", "?") : '1') {
+            case '1':
+                if (fs->fat_state & FAT_STATE_DIRTY) {
+                    if (fs->fat_bits == 32) {
+                        b32.state &= ~FAT_STATE_DIRTY;
+                        fs_write(0, sizeof(b32), &b32);
+                    }
+                    else if (fs->fat_bits == 16) {
+                        b16.state &= ~FAT_STATE_DIRTY;
+                        fs_write(0, sizeof(b16), &b16);
+                    }
+                }
+
+                if (!(fat_2nd.value & dirty_mask)) {
+                    set_fat(fs, 1, fat_2nd.value | dirty_mask);
+                }
+
+                fs->fat_state &= ~FAT_STATE_DIRTY;
+                break;
+            case '2':
+                break;
+        }
+    }
+}
+
 /* Local Variables: */
 /* tab-width: 8     */
 /* End:             */

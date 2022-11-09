@@ -9,6 +9,10 @@
    replaces broken FATs and rejects invalid cluster entries. */
 void read_fat(DOS_FS *fs);
 
+/* read cluster-th FAT_ENTRY value from fs->fat
+ * this function should be called after read_fat() */
+void get_fat(DOS_FS *fs, uint32_t cluster, FAT_ENTRY *entry);
+
 /* Changes the value of the CLUSTERth cluster of the FAT of FS to NEW. Special
    values of NEW are -1 (EOF, 0xff8 or 0xfff8) and -2 (bad sector, 0xff7 or
    0xfff7) */

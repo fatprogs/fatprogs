@@ -391,11 +391,13 @@ void read_boot(DOS_FS *fs)
             memmove(fs->label, b16->label, 11);
         else
             fs->label = NULL;
+        fs->fat_state = b16->state;
     } else if (fs->fat_bits == 32) {
         if (b.extended_sig == 0x29)
             memmove(fs->label, &b.label, 11);
         else
             fs->label = NULL;
+        fs->fat_state = b.state;
     }
 
     if (fs->clusters > ((unsigned long long)fs->fat_size * 8 / fs->fat_bits) - 2)

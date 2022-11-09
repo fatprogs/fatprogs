@@ -22,4 +22,7 @@ int check_valid_label(char *label);
 void scan_root_only(DOS_FS *fs, label_t **head, label_t **last);
 void write_label(DOS_FS *fs, char *label, label_t **head, label_t **last);
 
+int check_dirty_flag(DOS_FS *fs);
+void clean_dirty_flag(DOS_FS *fs);
+
 #endif

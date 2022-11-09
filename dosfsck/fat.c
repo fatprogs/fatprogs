@@ -16,7 +16,7 @@
 #include "check.h"
 #include "fat.h"
 
-static void get_fat(FAT_ENTRY *entry, void *fat, uint32_t cluster, DOS_FS *fs)
+static void get_fat_entry(FAT_ENTRY *entry, void *fat, uint32_t cluster, DOS_FS *fs)
 {
     unsigned char *ptr;
 
@@ -74,8 +74,8 @@ void read_fat(DOS_FS *fs)
     if (second && memcmp(first, second, eff_size) != 0) {
         FAT_ENTRY first_media, second_media;
 
-        get_fat(&first_media, first, 0, fs);
-        get_fat(&second_media, second, 0, fs);
+        get_fat_entry(&first_media, first, 0, fs);
+        get_fat_entry(&second_media, second, 0, fs);
         first_ok = (first_media.value & FAT_EXTD(fs)) == FAT_EXTD(fs);
         second_ok = (second_media.value & FAT_EXTD(fs)) == FAT_EXTD(fs);
 
@@ -120,8 +120,12 @@ void read_fat(DOS_FS *fs)
     }
 
     fs->fat = qalloc(&mem_queue, sizeof(FAT_ENTRY) * (fs->clusters + 2ULL));
+    for (i = 0; i< 2; i++) {
+        get_fat_entry(&fs->fat[i], first, i, fs);
+    }
+
     for (i = 2; i < fs->clusters + 2; i++) {
-        get_fat(&fs->fat[i], first, i, fs);
+        get_fat_entry(&fs->fat[i], first, i, fs);
 
         if (fs->fat[i].value >= fs->clusters + 2 &&
                 (fs->fat[i].value < FAT_MIN_BAD(fs))) {
@@ -131,7 +135,13 @@ void read_fat(DOS_FS *fs)
             set_fat(fs, i, -1);
         }
     }
+
     free(first);
+}
+
+void get_fat(DOS_FS *fs, uint32_t cluster, FAT_ENTRY *fatent)
+{
+    *fatent = fs->fat[cluster];
 }
 
 void set_fat(DOS_FS *fs, uint32_t cluster, uint32_t new)
