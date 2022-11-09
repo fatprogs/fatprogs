@@ -1,3 +1,23 @@
+fatprogs v2.12.1 - released 2022-4-30
+=====================================
+
+CHANGES:
+ * dosfsck: minimize memory using bitmap.
+ * dosfsck: improve performance on changed list, FAT read, etc.
+ * mkdosfs: minimize memory for FAT read.
+ * Makefile: add target for debugging with address sanitizer.
+ * Apply pread/pwrite instead of lseek and read/write.
+
+NEW FEATURES:
+ * dosfsdump: add dump tool for debugging.
+ * dosfsck: read FAT from mmap memory.
+
+BUG FIXES:
+ * dosfsck: fix wrong calculated FAT size to read.
+
+Move version.h to 'include' directory.
+
+
 fatprogs v2.12.0 - released 2022-3-30
 =====================================
 Since fatprogs starts from dosfstools(v2.11) project, decide that

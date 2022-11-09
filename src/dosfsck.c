@@ -7,7 +7,7 @@
 /* FAT32, VFAT, Atari format support, and various fixes additions May 1998
  * by Roman Hodek <Roman.Hodek@informatik.uni-erlangen.de> */
 
-#include "../version.h"
+#include "version.h"
 
 #include <stdio.h>
 #include <stdlib.h>

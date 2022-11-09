@@ -2,7 +2,7 @@
 
 /* dosfsdump.c  -  User interface */
 
-#include "../version.h"
+#include "version.h"
 
 #include <stdio.h>
 #include <stdlib.h>

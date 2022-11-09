@@ -54,7 +54,7 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA. */
 
 /* Include the header files */
 
-#include "../version.h"
+#include "version.h"
 
 #include <fcntl.h>
 #include <linux/hdreg.h>
