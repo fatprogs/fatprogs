@@ -36,34 +36,6 @@ static void usage(int error)
     exit(status);
 }
 
-/*
- * ++roman: On m68k, check if this is an Atari; if yes, turn on Atari variant
- * of MS-DOS filesystem by default.
- */
-static void check_atari(void)
-{
-#ifdef __mc68000__
-    FILE *f;
-    char line[128], *p;
-
-    if (!(f = fopen("/proc/hardware", "r"))) {
-        perror("/proc/hardware");
-        return;
-    }
-
-    while (fgets(line, sizeof(line), f)) {
-        if (strncmp(line, "Model:", 6) == 0) {
-            p = line + 6;
-            p += strspn(p, " \t");
-            if (strncmp(p, "Atari ", 6) == 0)
-                atari_format = 1;
-            break;
-        }
-    }
-    fclose(f);
-#endif
-}
-
 int main(int argc, char *argv[])
 {
     DOS_FS fs;
@@ -74,7 +46,7 @@ int main(int argc, char *argv[])
     char *label = NULL;
     char vol_label[LEN_VOLUME_LABEL + 1] = {'\0', };
 
-    check_atari();
+    check_atari(&atari_format);
 
     if (argc < 2 || argc > 3)
         usage(1);

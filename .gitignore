@@ -1,2 +1,8 @@
 cscope.*
 tags
+
+dump.file
+*.o
+dosfsck
+dosfslabel
+mkdosfs

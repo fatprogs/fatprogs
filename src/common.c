@@ -105,6 +105,34 @@ char get_key(char *valid, char *prompt)
     }
 }
 
+/*
+ * ++roman: On m68k, check if this is an Atari; if yes, turn on Atari variant
+ * of MS-DOS filesystem by default.
+ */
+void check_atari(int *atari_format)
+{
+#ifdef __mc68000__
+    FILE *f;
+    char line[128], *p;
+
+    if (!(f = fopen("/proc/hardware", "r"))) {
+        perror("/proc/hardware");
+        return;
+    }
+
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "Model:", 6) == 0) {
+            p = line + 6;
+            p += strspn(p, " \t");
+            if (strncmp(p, "Atari ", 6) == 0)
+                *atari_format = 1;
+            break;
+        }
+    }
+    fclose(f);
+#endif
+}
+
 /* Local Variables: */
 /* tab-width: 8     */
 /* End:             */

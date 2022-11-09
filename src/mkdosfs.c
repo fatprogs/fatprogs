@@ -74,6 +74,7 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA. */
 #include <asm/types.h>
 
 #include "dosfs.h"
+#include "common.h"
 
 /* In earlier versions, an own llseek() was used, but glibc lseek() is
  * sufficient (or even better :) for 64 bit offsets in the meantime */
@@ -88,11 +89,8 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA. */
 #define SECTORS_PER_BLOCK (BLOCK_SIZE / HARD_SECTOR_SIZE)
 
 /* Macro definitions */
-/* Report a failure message and return a failure error code */
-#define die(str) fatal_error("%s: " str "\n")
-
 /* Mark a cluster in the FAT as bad */
-#define mark_sector_bad(sector) mark_FAT_sector(sector, FAT_BAD)
+#define mark_sector_bad(sector) mark_FAT_sector(sector, VALUE_FAT_BAD)
 
 /* Compute ceil(a/b) */
 inline __attribute__((always_inline)) int cdiv(int a, int b)
@@ -101,8 +99,8 @@ inline __attribute__((always_inline)) int cdiv(int a, int b)
 }
 
 /* FAT values */
-#define FAT_EOF      (atari_format ? 0x0fffffff : 0x0ffffff8)
-#define FAT_BAD      0x0ffffff7
+#define VALUE_FAT_EOF   (atari_format ? 0x0fffffff : 0x0ffffff8)
+#define VALUE_FAT_BAD   0x0ffffff7
 
 #define HD_DRIVE_NUMBER 0x80	/* Boot off first hard drive */
 #define FD_DRIVE_NUMBER 0x00	/* Boot off first floppy drive */
@@ -182,7 +180,6 @@ static char *template_boot_code;	/* Variable to store a full template boot secto
 static int use_template = 0;
 static char *program_name = "mkdosfs";	/* Name of the program */
 static char *device_name = NULL;	/* Name of the device on which to create the filesystem */
-static int atari_format = 0;	/* Use Atari variation of MS-DOS FS format */
 static int check = FALSE;	/* Default to no readablity checking */
 static int verbose = 0;		/* Default to verbose mode off */
 static long volume_id;		/* Volume ID number */
@@ -227,6 +224,8 @@ static void check_mount(char *device_name);
 static void establish_params(int device_num, int size);
 static void setup_tables(void);
 static void write_tables(void);
+
+int atari_format = 0;	/* Use Atari variation of MS-DOS FS format */
 
 /* The function implementations */
 
@@ -283,7 +282,7 @@ static void mark_FAT_sector(int sector, unsigned int value)
 {
     int cluster;
 
-    cluster = (sector - start_data_sector) / (int)(bs.cluster_size) /
+    cluster = (sector - start_data_sector) / (int)(bs.sec_per_clus) /
         (sector_size / HARD_SECTOR_SIZE);
 
     if (cluster < 0)
@@ -525,7 +524,7 @@ static void establish_params(int device_num, int size)
         }
 
         /*  Set up the geometry information */
-        bs.secs_track = CT_LE_W(param.sect);
+        bs.sec_per_track = CT_LE_W(param.sect);
         bs.heads = CT_LE_W(param.head);
 
         /*  Set up the media descriptor byte */
@@ -533,7 +532,7 @@ static void establish_params(int device_num, int size)
             /* 5.25", 2, 9, 40 - 360K */
             case 720:
                 bs.media = (char)0xfd;
-                bs.cluster_size = (char)2;
+                bs.sec_per_clus = (char)2;
                 bs.dir_entries[0] = (char)112;
                 bs.dir_entries[1] = (char)0;
                 break;
@@ -541,7 +540,7 @@ static void establish_params(int device_num, int size)
             /* 3.5", 2, 9, 80 - 720K */
             case 1440:
                 bs.media = (char)0xf9;
-                bs.cluster_size = (char)2;
+                bs.sec_per_clus = (char)2;
                 bs.dir_entries[0] = (char)112;
                 bs.dir_entries[1] = (char)0;
                 break;
@@ -549,7 +548,7 @@ static void establish_params(int device_num, int size)
             /* 5.25", 2, 15, 80 - 1200K */
             case 2400:
                 bs.media = (char)0xf9;
-                bs.cluster_size = (char)(atari_format ? 2 : 1);
+                bs.sec_per_clus = (char)(atari_format ? 2 : 1);
                 bs.dir_entries[0] = (char)224;
                 bs.dir_entries[1] = (char)0;
                 break;
@@ -557,7 +556,7 @@ static void establish_params(int device_num, int size)
             /* 3.5", 2, 36, 80 - 2880K */
             case 5760:
                 bs.media = (char)0xf0;
-                bs.cluster_size = (char)2;
+                bs.sec_per_clus = (char)2;
                 bs.dir_entries[0] = (char)224;
                 bs.dir_entries[1] = (char)0;
                 break;
@@ -566,7 +565,7 @@ static void establish_params(int device_num, int size)
             case 2880:
 floppy_default:
                 bs.media = (char)0xf0;
-                bs.cluster_size = (char)(atari_format ? 2 : 1);
+                bs.sec_per_clus = (char)(atari_format ? 2 : 1);
                 bs.dir_entries[0] = (char)224;
                 bs.dir_entries[1] = (char)0;
                 break;
@@ -588,50 +587,50 @@ floppy_default:
         switch (loop_size) {
             /* 5.25", 2, 9, 40 - 360K */
             case 720:
-                bs.secs_track = CF_LE_W(9);
+                bs.sec_per_track = CF_LE_W(9);
                 bs.heads = CF_LE_W(2);
                 bs.media = (char)0xfd;
-                bs.cluster_size = (char)2;
+                bs.sec_per_clus = (char)2;
                 bs.dir_entries[0] = (char)112;
                 bs.dir_entries[1] = (char)0;
                 break;
 
             /* 3.5", 2, 9, 80 - 720K */
             case 1440:
-                bs.secs_track = CF_LE_W(9);
+                bs.sec_per_track = CF_LE_W(9);
                 bs.heads = CF_LE_W(2);
                 bs.media = (char)0xf9;
-                bs.cluster_size = (char)2;
+                bs.sec_per_clus = (char)2;
                 bs.dir_entries[0] = (char)112;
                 bs.dir_entries[1] = (char)0;
                 break;
 
             /* 5.25", 2, 15, 80 - 1200K */
             case 2400:
-                bs.secs_track = CF_LE_W(15);
+                bs.sec_per_track = CF_LE_W(15);
                 bs.heads = CF_LE_W(2);
                 bs.media = (char)0xf9;
-                bs.cluster_size = (char)(atari_format ? 2 : 1);
+                bs.sec_per_clus = (char)(atari_format ? 2 : 1);
                 bs.dir_entries[0] = (char)224;
                 bs.dir_entries[1] = (char)0;
                 break;
 
             /* 3.5", 2, 36, 80 - 2880K */
             case 5760:
-                bs.secs_track = CF_LE_W(36);
+                bs.sec_per_track = CF_LE_W(36);
                 bs.heads = CF_LE_W(2);
                 bs.media = (char)0xf0;
-                bs.cluster_size = (char)2;
+                bs.sec_per_clus = (char)2;
                 bs.dir_entries[0] = (char)224;
                 bs.dir_entries[1] = (char)0;
                 break;
 
             /* 3.5", 2, 18, 80 - 1440K */
             case 2880:
-                bs.secs_track = CF_LE_W(18);
+                bs.sec_per_track = CF_LE_W(18);
                 bs.heads = CF_LE_W(2);
                 bs.media = (char)0xf0;
-                bs.cluster_size = (char)(atari_format ? 2 : 1);
+                bs.sec_per_clus = (char)(atari_format ? 2 : 1);
                 bs.dir_entries[0] = (char)224;
                 bs.dir_entries[1] = (char)0;
                 break;
@@ -640,7 +639,7 @@ floppy_default:
             default:
                 printf("Loop device does not match a floppy size, using "
                         "default hd params\n");
-                bs.secs_track = CT_LE_W(32); /* these are fake values... */
+                bs.sec_per_track = CT_LE_W(32); /* these are fake values... */
                 bs.heads = CT_LE_W(64);
                 goto def_hd_params;
         }
@@ -652,12 +651,12 @@ floppy_default:
         if (ioctl(dev, HDIO_GETGEO, &geometry) || geometry.sectors == 0
                 || geometry.heads == 0) {
             printf("unable to get drive geometry, using default 255/63\n");
-            bs.secs_track = CT_LE_W(63);
+            bs.sec_per_track = CT_LE_W(63);
             bs.heads = CT_LE_W(255);
         }
         else {
             /* Set up the geometry information */
-            bs.secs_track = CT_LE_W(geometry.sectors);
+            bs.sec_per_track = CT_LE_W(geometry.sectors);
             bs.heads = CT_LE_W(geometry.heads);
         }
 def_hd_params:
@@ -681,13 +680,13 @@ def_hd_params:
             unsigned long sz_mb =
                 (blocks + (1 << (20 - BLOCK_SIZE_BITS)) - 1) >>
                 (20 - BLOCK_SIZE_BITS);
-            bs.cluster_size = sz_mb >= 16 * 1024 ? 32 :
+            bs.sec_per_clus = sz_mb >= 16 * 1024 ? 32 :
                 sz_mb >=  8 * 1024 ? 16 :
                 sz_mb >=       256 ?  8 : 1;
         }
         else {
             /* FAT12 and FAT16: start at 4 sectors per cluster */
-            bs.cluster_size = (char)4;
+            bs.sec_per_clus = (char)4;
         }
     }
 }
@@ -696,7 +695,7 @@ def_hd_params:
 static void setup_tables(void)
 {
     unsigned num_sectors;
-    unsigned cluster_count = 0, fat_length;
+    unsigned cluster_count = 0, sec_per_fat;
     unsigned fatdata;			/* Sectors for FATs + data area */
     struct tm *ctime;
     struct volume_info *vi = (size_fat == 32 ? &bs.fat32.vi : &bs.oldfat.vi);
@@ -710,7 +709,7 @@ static void setup_tables(void)
         strncpy((char *)bs.system_id, "mkdosfs", sizeof(bs.system_id));
 
     if (sectors_per_cluster)
-        bs.cluster_size = (char)sectors_per_cluster;
+        bs.sec_per_clus = (char)sectors_per_cluster;
 
     if (size_fat == 32) {
         /* Under FAT32, the root dir is in a cluster chain, and this is
@@ -791,9 +790,9 @@ static void setup_tables(void)
     if (verbose >= 2)
         printf("Using %d reserved sectors\n", reserved_sectors);
 
-    bs.fats = (char) nr_fats;
+    bs.nfats = (char) nr_fats;
     if (!atari_format || size_fat == 32)
-        bs.hidden = bs.secs_track;
+        bs.hidden = bs.sec_per_track;
     else {
         /* In Atari format, hidden is a 16 bit field */
         __u16 hidden = CT_LE_W(hidden_sectors);
@@ -805,7 +804,7 @@ static void setup_tables(void)
 
     num_sectors = (long long)blocks * BLOCK_SIZE / sector_size;
     if (!atari_format) {
-        unsigned fatlength12, fatlength16, fatlength32;
+        unsigned sec_per_fat12, sec_per_fat16, sec_per_fat32;
         unsigned maxclust12, maxclust16, maxclust32;
         unsigned clust12, clust16, clust32;
         int maxclustsize;
@@ -814,35 +813,36 @@ static void setup_tables(void)
             reserved_sectors;
 
         if (sectors_per_cluster)
-            bs.cluster_size = maxclustsize = sectors_per_cluster;
+            bs.sec_per_clus = maxclustsize = sectors_per_cluster;
         else
-            /* An initial guess for bs.cluster_size should already be set */
+            /* An initial guess for bs.sec_per_clus should already be set */
             maxclustsize = 128;
 
         if (verbose >= 2)
             printf("%d sectors for FAT+data, starting with %d sectors/cluster\n",
-                    fatdata, bs.cluster_size);
+                    fatdata, bs.sec_per_clus);
+
         do {
             if (verbose >= 2)
-                printf("Trying with %d sectors/cluster:\n", bs.cluster_size);
+                printf("Trying with %d sectors/cluster:\n", bs.sec_per_clus);
 
             /* The factor 2 below avoids cut-off errors for nr_fats == 1.
              * The "nr_fats*3" is for the reserved first two FAT entries */
             clust12 = 2 * ((long long)fatdata * sector_size + nr_fats * 3) /
-                (2 * (int)bs.cluster_size * sector_size + nr_fats * 3);
-            fatlength12 = cdiv(((clust12 + 2) * 3 + 1) >> 1, sector_size);
+                (2 * (int)bs.sec_per_clus * sector_size + nr_fats * 3);
+            sec_per_fat12 = cdiv(((clust12 + 2) * 3 + 1) >> 1, sector_size);
 
             /* Need to recalculate number of clusters, since the unused parts of the
              * FATS and data area together could make up space for an additional,
              * not really present cluster. */
-            clust12 = (fatdata - nr_fats * fatlength12) / bs.cluster_size;
-            maxclust12 = (fatlength12 * 2 * sector_size) / 3;
+            clust12 = (fatdata - nr_fats * sec_per_fat12) / bs.sec_per_clus;
+            maxclust12 = (sec_per_fat12 * 2 * sector_size) / 3;
             if (maxclust12 > MAX_CLUST_12)
                 maxclust12 = MAX_CLUST_12;
 
             if (verbose >= 2)
                 printf("FAT12: #clu=%u, fatlen=%u, maxclu=%u, limit=%u\n",
-                        clust12, fatlength12, maxclust12, MAX_CLUST_12);
+                        clust12, sec_per_fat12, maxclust12, MAX_CLUST_12);
 
             if (clust12 > maxclust12 - 2) {
                 clust12 = 0;
@@ -851,20 +851,20 @@ static void setup_tables(void)
             }
 
             clust16 = ((long long)fatdata * sector_size + nr_fats * 4) /
-                ((int)bs.cluster_size * sector_size + nr_fats * 2);
-            fatlength16 = cdiv((clust16 + 2) * 2, sector_size);
+                ((int)bs.sec_per_clus * sector_size + nr_fats * 2);
+            sec_per_fat16 = cdiv((clust16 + 2) * 2, sector_size);
 
             /* Need to recalculate number of clusters, since the unused parts of the
              * FATS and data area together could make up space for an additional,
              * not really present cluster. */
-            clust16 = (fatdata - nr_fats * fatlength16) / bs.cluster_size;
-            maxclust16 = (fatlength16 * sector_size) / 2;
+            clust16 = (fatdata - nr_fats * sec_per_fat16) / bs.sec_per_clus;
+            maxclust16 = (sec_per_fat16 * sector_size) / 2;
             if (maxclust16 > MAX_CLUST_16)
                 maxclust16 = MAX_CLUST_16;
 
             if (verbose >= 2)
                 printf("FAT16: #clu=%u, fatlen=%u, maxclu=%u, limit=%u\n",
-                        clust16, fatlength16, maxclust16, MAX_CLUST_16);
+                        clust16, sec_per_fat16, maxclust16, MAX_CLUST_16);
 
             if (clust16 > maxclust16 - 2) {
                 if (verbose >= 2)
@@ -882,15 +882,15 @@ static void setup_tables(void)
                 clust16 = 0;
             }
 
-            clust32 = ((long long)fatdata *sector_size + nr_fats * 8) /
-                ((int) bs.cluster_size * sector_size + nr_fats * 4);
-            fatlength32 = cdiv((clust32 + 2) * 4, sector_size);
+            clust32 = ((long long)fatdata * sector_size + nr_fats * 8) /
+                ((int)bs.sec_per_clus * sector_size + nr_fats * 4);
+            sec_per_fat32 = cdiv((clust32 + 2) * 4, sector_size);
 
             /* Need to recalculate number of clusters, since the unused parts of the
              * FATS and data area together could make up space for an additional,
              * not really present cluster. */
-            clust32 = (fatdata - nr_fats * fatlength32) / bs.cluster_size;
-            maxclust32 = (fatlength32 * sector_size) / 4;
+            clust32 = (fatdata - nr_fats * sec_per_fat32) / bs.sec_per_clus;
+            maxclust32 = (sec_per_fat32 * sector_size) / 4;
             if (maxclust32 > MAX_CLUST_32)
                 maxclust32 = MAX_CLUST_32;
 
@@ -903,7 +903,7 @@ static void setup_tables(void)
 
             if (verbose >= 2)
                 printf("FAT32: #clu=%u, fatlen=%u, maxclu=%u, limit=%u\n",
-                        clust32, fatlength32, maxclust32, MAX_CLUST_32);
+                        clust32, sec_per_fat32, maxclust32, MAX_CLUST_32);
 
             if (clust32 > maxclust32) {
                 clust32 = 0;
@@ -916,8 +916,8 @@ static void setup_tables(void)
                     (clust32 && size_fat == 32))
                 break;
 
-            bs.cluster_size <<= 1;
-        } while (bs.cluster_size && bs.cluster_size <= maxclustsize);
+            bs.sec_per_clus <<= 1;
+        } while (bs.sec_per_clus && bs.sec_per_clus <= maxclustsize);
 
         /* Use the optimal FAT size if not specified;
          * FAT32 is (not yet) choosen automatically */
@@ -930,8 +930,8 @@ static void setup_tables(void)
         switch (size_fat) {
             case 12:
                 cluster_count = clust12;
-                fat_length = fatlength12;
-                bs.fat_length = CT_LE_W(fatlength12);
+                sec_per_fat = sec_per_fat12;
+                bs.sec_per_fat = CT_LE_W(sec_per_fat12);
                 memcpy(vi->fs_type, MSDOS_FAT12_SIGN, 8);
                 break;
             case 16:
@@ -954,15 +954,15 @@ static void setup_tables(void)
                     }
                 }
                 cluster_count = clust16;
-                fat_length = fatlength16;
-                bs.fat_length = CT_LE_W(fatlength16);
+                sec_per_fat = sec_per_fat16;
+                bs.sec_per_fat = CT_LE_W(sec_per_fat16);
                 memcpy(vi->fs_type, MSDOS_FAT16_SIGN, 8);
                 break;
             case 32:
                 cluster_count = clust32;
-                fat_length = fatlength32;
-                bs.fat_length = CT_LE_W(0);
-                bs.fat32.fat32_length = CT_LE_L(fatlength32);
+                sec_per_fat = sec_per_fat32;
+                bs.sec_per_fat = CT_LE_W(0);
+                bs.fat32.sec_per_fat32 = CT_LE_L(sec_per_fat32);
                 memcpy(vi->fs_type, MSDOS_FAT32_SIGN, 8);
                 break;
             default:
@@ -987,7 +987,7 @@ static void setup_tables(void)
          * the user, since GEMDOS doesn't like other cluster sizes very much.
          * Instead, tune the sector size for the FS to fit.
          */
-        bs.cluster_size = sectors_per_cluster ? sectors_per_cluster : 2;
+        bs.sec_per_clus = sectors_per_cluster ? sectors_per_cluster : 2;
         if (!sector_size_set) {
             while (num_sectors > GEMDOS_MAX_SECTORS) {
                 num_sectors >>= 1;
@@ -1008,18 +1008,19 @@ static void setup_tables(void)
              * size_fat == 12
              * The "2*nr_fats*size_fat/8" is for the reserved first two FAT entries
              */
-            clusters = (2 * ((long long)fatdata*sector_size - 2 * nr_fats * size_fat / 8)) /
-                (2 * ((int)bs.cluster_size * sector_size + nr_fats * size_fat / 8));
-            fat_length = cdiv((clusters + 2) * size_fat / 8, sector_size);
+            clusters =
+                (2 * ((long long)fatdata * sector_size - 2 * nr_fats * size_fat / 8)) /
+                (2 * ((int)bs.sec_per_clus * sector_size + nr_fats * size_fat / 8));
+            sec_per_fat = cdiv((clusters + 2) * size_fat / 8, sector_size);
 
             /* Need to recalculate number of clusters, since the unused parts of the
              * FATS and data area together could make up space for an additional,
              * not really present cluster. */
-            clusters = (fatdata - nr_fats * fat_length) / bs.cluster_size;
-            maxclust = (fat_length * sector_size * 8) / size_fat;
+            clusters = (fatdata - nr_fats * sec_per_fat) / bs.sec_per_clus;
+            maxclust = (sec_per_fat * sector_size * 8) / size_fat;
             if (verbose >= 2)
                 printf("ss=%d: #clu=%d, fat_len=%d, maxclu=%d\n",
-                        sector_size, clusters, fat_length, maxclust);
+                        sector_size, clusters, sec_per_fat, maxclust);
 
             /* last 10 cluster numbers are special (except FAT32: 4 high bits rsvd);
              * first two numbers are reserved */
@@ -1045,10 +1046,10 @@ static void setup_tables(void)
 
         cluster_count = clusters;
         if (size_fat != 32)
-            bs.fat_length = CT_LE_W(fat_length);
+            bs.sec_per_fat = CT_LE_W(sec_per_fat);
         else {
-            bs.fat_length = 0;
-            bs.fat32.fat32_length = CT_LE_L(fat_length);
+            bs.sec_per_fat = 0;
+            bs.fat32.sec_per_fat32 = CT_LE_L(sec_per_fat);
         }
     }
 
@@ -1113,7 +1114,7 @@ static void setup_tables(void)
     }
 
     /* The two following vars are in hard sectors, i.e. 512 byte sectors! */
-    start_data_sector = (reserved_sectors + nr_fats * fat_length) *
+    start_data_sector = (reserved_sectors + nr_fats * sec_per_fat) *
         (sector_size / HARD_SECTOR_SIZE);
     start_data_block = (start_data_sector + SECTORS_PER_BLOCK - 1) /
         SECTORS_PER_BLOCK;
@@ -1123,16 +1124,18 @@ static void setup_tables(void)
 
     if (verbose) {
         printf("%s has %d head%s and %d sector%s per track,\n",
-                device_name, CF_LE_W(bs.heads), (CF_LE_W(bs.heads) != 1) ? "s" : "",
-                CF_LE_W(bs.secs_track), (CF_LE_W(bs.secs_track) != 1) ? "s" : "");
+                device_name, CF_LE_W(bs.heads), (CF_LE_W(bs.heads) != 1) ?
+                "s" : "",
+                CF_LE_W(bs.sec_per_track), (CF_LE_W(bs.sec_per_track) != 1) ?
+                "s" : "");
         printf("logical sector size is %d,\n", sector_size);
         printf("using 0x%02x media descriptor, with %d sectors;\n",
                 (int)(bs.media), num_sectors);
         printf("file system has %d %d-bit FAT%s and %d sector%s per cluster.\n",
-                (int)(bs.fats), size_fat, (bs.fats != 1) ? "s" : "",
-                (int)(bs.cluster_size), (bs.cluster_size != 1) ? "s" : "");
+                (int)(bs.nfats), size_fat, (bs.nfats != 1) ? "s" : "",
+                (int)(bs.sec_per_clus), (bs.sec_per_clus != 1) ? "s" : "");
         printf ("FAT size is %d sector%s, and provides %d cluster%s.\n",
-                fat_length, (fat_length != 1) ? "s" : "",
+                sec_per_fat, (sec_per_fat != 1) ? "s" : "",
                 cluster_count, (cluster_count != 1) ? "s" : "");
 
         if (size_fat != 32)
@@ -1149,22 +1152,22 @@ static void setup_tables(void)
     }
 
     /* Make the file allocation tables! */
-    if ((fat = (unsigned char *)malloc(fat_length * sector_size)) == NULL)
+    if ((fat = (unsigned char *)malloc(sec_per_fat * sector_size)) == NULL)
         die("unable to allocate space for FAT image in memory");
 
-    memset(fat, 0, fat_length * sector_size);
+    memset(fat, 0, sec_per_fat * sector_size);
 
     mark_FAT_cluster(0, 0xffffffff);	/* Initial fat entries */
     mark_FAT_cluster(1, 0xffffffff);
     fat[0] = (unsigned char)bs.media;	/* Put media type in first byte! */
     if (size_fat == 32) {
         /* Mark cluster 2 as EOF (used for root dir) */
-        mark_FAT_cluster(2, FAT_EOF);
+        mark_FAT_cluster(2, VALUE_FAT_EOF);
     }
 
     /* Make the root directory entries */
     size_root_dir = (size_fat == 32) ?
-        bs.cluster_size * sector_size :
+        bs.sec_per_clus * sector_size :
         (((int)bs.dir_entries[1] * 256 + (int)bs.dir_entries[0]) *
          sizeof(struct dir_entry));
 
@@ -1252,10 +1255,10 @@ static void setup_tables(void)
 static void write_tables(void)
 {
     int x;
-    int fat_length;
+    int sec_per_fat;
 
-    fat_length = (size_fat == 32) ?
-        CF_LE_L(bs.fat32.fat32_length) : CF_LE_W(bs.fat_length);
+    sec_per_fat = (size_fat == 32) ?
+        CF_LE_L(bs.fat32.sec_per_fat32) : CF_LE_W(bs.sec_per_fat);
 
     seekto(0, "start of device");
 
@@ -1282,7 +1285,7 @@ static void write_tables(void)
     /* seek to start of FATS and write them all */
     seekto(reserved_sectors * sector_size, "first FAT");
     for (x = 1; x <= nr_fats; x++)
-        writebuf(fat, fat_length * sector_size, "FAT");
+        writebuf(fat, sec_per_fat * sector_size, "FAT");
 
     /* Write the root directory directly after the last FAT. This is the root
      * dir area on FAT12/16, and the first cluster on FAT32. */
@@ -1345,35 +1348,6 @@ void usage(void)
             /dev/name [blocks]\n");
 }
 
-/* TODO: same function in dosfsck directory */
-/*
- * ++roman: On m68k, check if this is an Atari; if yes, turn on Atari variant
- * of MS-DOS filesystem by default.
- */
-static void check_atari(void)
-{
-#ifdef __mc68000__
-    FILE *f;
-    char line[128], *p;
-
-    if (!(f = fopen("/proc/hardware", "r"))) {
-        perror("/proc/hardware");
-        return;
-    }
-
-    while (fgets(line, sizeof(line), f)) {
-        if (strncmp(line, "Model:", 6) == 0) {
-            p = line + 6;
-            p += strspn(p, " \t");
-            if (strncmp(p, "Atari ", 6) == 0)
-                atari_format = 1;
-            break;
-        }
-    }
-    fclose(f);
-#endif
-}
-
 /* The "main" entry point into the utility - we pick up the options
  * and attempt to process them in some sort of sensible way.
  * In the event that some/all of the options are invalid
@@ -1399,7 +1373,7 @@ int main(int argc, char **argv)
 
     time(&create_time);
     volume_id = (long)create_time;	/* Default volume ID = creation time */
-    check_atari();
+    check_atari(&atari_format);
 
     printf("%s " VERSION " (" VERSION_DATE ")\n", program_name);
 
@@ -1413,7 +1387,7 @@ int main(int argc, char **argv)
                 backup_boot = (int)strtol(optarg, &tmp, 0);
                 if (*tmp || backup_boot < 2 || backup_boot > 0xffff) {
                     printf("Bad location for backup boot sector : %s\n", optarg);
-                    usage ();
+                    usage();
                 }
                 break;
             case 'c':		/* c : Check FS as we build it */

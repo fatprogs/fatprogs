@@ -8,6 +8,14 @@
 #ifndef _COMMON_H
 #define _COMMON_H
 
+#ifndef offsetof
+#define offsetof(t, e)	((off_t)&(((t *)0)->e))
+#endif
+
+/* don't divide by zero */
+#define ROUND_TO_MULTIPLE(n, m) \
+    ((n) && (m) ? (n) + (m) - 1 - ((n) - 1) % (m) : 0)
+
 /* Displays a prinf-style message and terminates the program. */
 void die(char *msg, ...) __attribute((noreturn));
 
@@ -30,5 +38,7 @@ int min(int a, int b);
 /* Displays PROMPT and waits for user input. Only characters in VALID are
    accepted. Terminates the program on EOF. Returns the character. */
 char get_key(char *valid, char *prompt);
+
+void check_atari(int *atari_format);
 
 #endif

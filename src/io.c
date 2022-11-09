@@ -116,7 +116,7 @@ int fs_test(loff_t pos, int size)
     void *scratch;
     int okay;
 
-    if (llseek(fd, pos, 0) != pos)
+    if (llseek(fd, pos, SEEK_SET) != pos)
         pdie("Seek to %lld", pos);
     scratch = alloc(size);
     okay = read(fd, scratch, size) == size;
@@ -131,7 +131,7 @@ void fs_write(loff_t pos, int size, void *data)
 
     if (write_immed) {
         did_change = 1;
-        if (llseek(fd, pos, 0) != pos)
+        if (llseek(fd, pos, SEEK_SET) != pos)
             pdie("Seek to %lld", pos);
 
         if ((did = write(fd, data, size)) == size)
@@ -162,7 +162,7 @@ static void fs_flush(void)
     while (changes) {
         this = changes;
         changes = changes->next;
-        if (llseek(fd, this->pos, 0) != this->pos)
+        if (llseek(fd, this->pos, SEEK_SET) != this->pos)
             fprintf(stderr, "Seek to %lld failed: %s\n  Did not write %d bytes.\n",
                     (long long)this->pos, strerror(errno), this->size);
         else if ((size = write(fd, this->data, this->size)) < 0)

@@ -1,5 +1,5 @@
 #
-# Makefile for dosfstools (mkdosfs and dosfsck)
+# Makefile for dosfstools (mkdosfs, dosfsck, dosfslabel)
 #
 
 TOPDIR := $(shell pwd)
@@ -20,12 +20,10 @@ MANDIR = $(PREFIX)/usr/man/man8
 .EXPORT_ALL_VARIABLES:
 
 all dep clean install:
-	$(MAKE) -C mkdosfs $@
-	$(MAKE) -C dosfsck $@
+	$(MAKE) -C src $@
 
 distclean:
-	$(MAKE) -C mkdosfs $@
-	$(MAKE) -C dosfsck $@
+	$(MAKE) -C src $@
 	rm -f TAGS .#* .new* \#*# *~
 
 debug: OPTFLAGS = -O0 -g -fno-omit-frame-pointer -D_FILE_OFFSET_BITS=64 -fsanitize=address

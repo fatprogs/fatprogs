@@ -373,7 +373,7 @@ static void drop_file(DOS_FS *fs, DOS_FILE *file)
     MODIFY(file, name[0], DELETED_FLAG);
     if (!skip_set_owner) {
         for (cluster = FSTART(file, fs);
-                cluster > 0 && cluster < fs->clusters + 2;
+                cluster > 0 && cluster < fs->clusters + FAT_START_ENT;
                 cluster = next_cluster(fs, cluster)) {
             set_owner(fs, cluster, NULL);
         }
@@ -1664,7 +1664,8 @@ void scan_volume_entry(DOS_FS *fs, label_t **head, label_t **last)
         return;
     }
 
-    for (walk = root->first; walk; walk = walk->next) {
+    for (walk = fs->root_cluster ? root->first : root;
+            walk; walk = walk->next) {
         if (IS_FREE(walk->dir_ent.name) ||
                 IS_LFN_ENT(walk->dir_ent.attr) ||
                 !IS_VOLUME_LABEL(walk->dir_ent.attr)) {

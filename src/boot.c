@@ -15,10 +15,6 @@
 #include "io.h"
 #include "boot.h"
 
-/* don't divide by zero */
-#define ROUND_TO_MULTIPLE(n, m) \
-    ((n) && (m) ? (n) + (m) - 1 - ((n) - 1) % (m) : 0)
-
 static struct {
     __u8 media;
     char *descr;
@@ -34,18 +30,6 @@ static struct {
     { 0xfe, "5.25\" 160k floppy 1s/40tr/8sec" },
     { 0xff, "5.25\" 320k floppy 2s/40tr/8sec" },
 };
-
-#if defined __alpha || defined __ia64__ || defined __s390x__ || defined __x86_64__ || defined __ppc64__
-/* Unaligned fields must first be copied byte-wise */
-#define GET_UNALIGNED_W(f)			\
-    ({						\
-     unsigned short __v;			\
-     memcpy(&__v, &f, sizeof(__v));	\
-     CF_LE_W(*(unsigned short *)&__v);	\
-     })
-#else
-#define GET_UNALIGNED_W(f) CF_LE_W(*(unsigned short *)&f)
-#endif
 
 static char *get_media_descr(unsigned char media)
 {
@@ -85,7 +69,7 @@ static void dump_boot(DOS_FS *fs, struct boot_sector *b, unsigned lss)
     printf("First FAT starts at byte %llu (sector %llu)\n",
             (unsigned long long)fs->fat_start,
             (unsigned long long)fs->fat_start/lss);
-    printf("%10d FATs, %d bit entries\n", b->fats, fs->fat_bits);
+    printf("%10d FATs, %d bit entries\n", b->nfats, fs->fat_bits);
     printf("%10d bytes per FAT (= %u sectors)\n", fs->fat_size,
             fs->fat_size/lss);
     if (!fs->root_cluster) {
@@ -103,7 +87,7 @@ static void dump_boot(DOS_FS *fs, struct boot_sector *b, unsigned lss)
             (unsigned long long)fs->data_start/lss);
     printf("%10u data clusters (%llu bytes)\n", fs->clusters,
             (unsigned long long)fs->clusters * fs->cluster_size);
-    printf("%u sectors/track, %u heads\n", CF_LE_W(b->secs_track),
+    printf("%u sectors/track, %u heads\n", CF_LE_W(b->sec_per_track),
             CF_LE_W(b->heads));
     printf("%10u hidden sectors\n",
             atari_format ?
@@ -300,24 +284,27 @@ void read_boot(DOS_FS *fs)
     struct boot_sector b;
     unsigned total_sectors;
     unsigned short logical_sector_size, sectors;
-    unsigned fat_length;
+    unsigned sec_per_fat;
     off_t data_size;
     struct volume_info *vi;
 
     fs_read(0, sizeof(b), &b);
     logical_sector_size = GET_UNALIGNED_W(b.sector_size);
 
-    if (!logical_sector_size)
+    if (!logical_sector_size) {
         die("Logical sector size is zero.");
+    }
 
-    fs->cluster_size = b.cluster_size * logical_sector_size;
-    if (!fs->cluster_size)
+    fs->cluster_size = b.sec_per_clus * logical_sector_size;
+    if (!fs->cluster_size) {
         die("Cluster size is zero.");
+    }
 
-    if (b.fats != 2 && b.fats != 1)
-        die("Currently, only 1 or 2 FATs are supported, not %d.", b.fats);
+    if (b.nfats != 2 && b.nfats != 1) {
+        die("Currently, only 1 or 2 FATs are supported, not %d.", b.nfats);
+    }
 
-    fs->nfats = b.fats;
+    fs->nfats = b.nfats;
     sectors = GET_UNALIGNED_W(b.sectors);
     total_sectors = sectors ? sectors : CF_LE_L(b.total_sect);
     if (verbose)
@@ -326,10 +313,10 @@ void read_boot(DOS_FS *fs)
     /* Can't access last odd sector anyway, so round down */
     fs_test((off_t)((total_sectors & ~1) - 1) * (off_t)logical_sector_size,
             logical_sector_size);
-    fat_length = CF_LE_W(b.fat_length) ?
-        CF_LE_W(b.fat_length) : CF_LE_L(b.fat32.fat32_length);
+    sec_per_fat = CF_LE_W(b.sec_per_fat) ?
+        CF_LE_W(b.sec_per_fat) : CF_LE_L(b.fat32.sec_per_fat32);
     fs->fat_start = (off_t)CF_LE_W(b.reserved_cnt) * logical_sector_size;
-    fs->root_start = ((off_t)CF_LE_W(b.reserved_cnt) + b.fats * fat_length) *
+    fs->root_start = ((off_t)CF_LE_W(b.reserved_cnt) + b.nfats * sec_per_fat) *
         logical_sector_size;
     fs->root_entries = GET_UNALIGNED_W(b.dir_entries);
     fs->data_start = fs->root_start +
@@ -340,7 +327,7 @@ void read_boot(DOS_FS *fs)
     fs->fsinfo_start = 0;   /* no FSINFO structure */
     fs->free_clusters = -1; /* unknown */
 
-    if (!b.fat_length && b.fat32.fat32_length) {
+    if (!b.sec_per_fat && b.fat32.sec_per_fat32) {
         fs->fat_bits = 32;
         fs->root_cluster = CF_LE_L(b.fat32.root_cluster);
         if (!fs->root_cluster && fs->root_entries)
@@ -351,8 +338,9 @@ void read_boot(DOS_FS *fs)
              * to complex for now... */
             printf("Warning: FAT32 root dir not in cluster chain! "
                     "Compability mode...\n");
-        else if (!fs->root_cluster && !fs->root_entries)
+        else if (!fs->root_cluster && !fs->root_entries) {
             die("No root directory!");
+        }
         else if (fs->root_cluster && fs->root_entries)
             printf("Warning: FAT32 root dir is in a cluster chain, but "
                     "a separate root dir\n"
@@ -375,7 +363,7 @@ void read_boot(DOS_FS *fs)
 
         /* If more clusters than fat entries in 16-bit fat, we assume
          * it's a real MSDOS FS with 12-bit fat. */
-        if (fs->clusters + 2 > fat_length * logical_sector_size * 8 / 16 ||
+        if (fs->clusters + 2 > sec_per_fat * logical_sector_size * 8 / 16 ||
                 /* if it's a floppy disk --> 12bit fat */
                 device_no == 2 ||
                 /* if it's a ramdisk or loopback device and has one of the usual
@@ -385,17 +373,19 @@ void read_boot(DOS_FS *fs)
                   total_sectors == 2880)))
             fs->fat_bits = 12;
     }
+
     /* On FAT32, the high 4 bits of a FAT entry are reserved */
     fs->eff_fat_bits = (fs->fat_bits == 32) ? 28 : fs->fat_bits;
-    fs->fat_size = fat_length * logical_sector_size;
+    fs->fat_size = sec_per_fat * logical_sector_size;
 
     fs->label = calloc(12, sizeof (__u8));
     if (fs->fat_bits == 12 || fs->fat_bits == 16) {
         vi = &b.oldfat.vi;
     } else if (fs->fat_bits == 32) {
         vi = &b.fat32.vi;
-    } else
-        die("Can't find fat type");
+    } else {
+        die("Can't find fat type.");
+    }
 
     if (vi->extended_sig == MSDOS_EXT_SIGN)
         memmove(fs->label, vi->label, LEN_VOLUME_LABEL);
@@ -409,20 +399,23 @@ void read_boot(DOS_FS *fs)
                 fs->clusters,
                 ((unsigned long long)fs->fat_size * 8 / fs->fat_bits) - 2);
 
-    if (!fs->root_entries && !fs->root_cluster)
-        die("Root directory has zero size.");
+    if (!fs->root_entries && !fs->root_cluster) {
+        die("Root directory has zero size");
+    }
 
-    if (fs->root_entries & (MSDOS_DPS - 1))
+    if (fs->root_entries & (MSDOS_DPS - 1)) {
         die("Root directory (%d entries) doesn't span an integral number of "
                 "sectors.", fs->root_entries);
+    }
 
-    if (logical_sector_size & (SECTOR_SIZE - 1))
+    if (logical_sector_size & (SECTOR_SIZE - 1)) {
         die("Logical sector size (%d bytes) is not a multiple of the physical "
                 "sector size.", logical_sector_size);
+    }
 
 #if 0 /* linux kernel doesn't check that either */
     /* ++roman: On Atari, these two fields are often left uninitialized */
-    if (!atari_format && (!b.secs_track || !b.heads))
+    if (!atari_format && (!b.sec_per_track || !b.heads))
         die("Invalid disk format in boot sector.");
 #endif
     if (verbose)

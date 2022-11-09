@@ -41,6 +41,7 @@ static void get_fat_entry(FAT_ENTRY *entry, void *fat, uint32_t cluster, DOS_FS 
         default:
             die("Bad FAT entry size: %d bits.", fs->fat_bits);
     }
+
     entry->owner = NULL;
 }
 
@@ -56,6 +57,7 @@ void read_fat(DOS_FS *fs)
     void *first, *second = NULL;
     int first_ok, second_ok;
 
+    /* 2 == FAT_START_ENT */
     eff_size = ((fs->clusters + 2ULL) * fs->fat_bits + 7) / 8ULL;
     first = alloc(eff_size);
     fs_read(fs->fat_start, eff_size, first);
@@ -120,18 +122,17 @@ void read_fat(DOS_FS *fs)
     }
 
     fs->fat = qalloc(&mem_queue, sizeof(FAT_ENTRY) * (fs->clusters + 2ULL));
-    for (i = 0; i< 2; i++) {
+    for (i = 0; i < FAT_START_ENT; i++) {
         get_fat_entry(&fs->fat[i], first, i, fs);
     }
 
-    for (i = 2; i < fs->clusters + 2; i++) {
+    for (i = FAT_START_ENT; i < fs->clusters + 2; i++) {
         get_fat_entry(&fs->fat[i], first, i, fs);
 
         if (fs->fat[i].value >= fs->clusters + 2 &&
                 (fs->fat[i].value < FAT_MIN_BAD(fs))) {
-            /* FIXME: why is cluster number (i - 2) ? */
             printf("Cluster %u out of range (%u > %u). Setting to EOF.\n",
-                    i - 2, fs->fat[i].value, fs->clusters + 2 - 1);
+                    i, fs->fat[i].value, fs->clusters + 2 - 1);
             set_fat(fs, i, -1);
         }
     }
@@ -253,7 +254,7 @@ void reclaim_free(DOS_FS *fs)
         printf("Checking for unused clusters.\n");
 
     reclaimed = 0;
-    for (i = 2; i < fs->clusters + 2; i++) {
+    for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
         if (!get_owner(fs, i) && fs->fat[i].value &&
                 !FAT_IS_BAD(fs, fs->fat[i].value)) {
             set_fat(fs, i, 0);
@@ -275,7 +276,7 @@ static void tag_free(DOS_FS *fs, DOS_FILE *ptr)
     uint32_t prev;
     uint32_t i, walk;
 
-    for (i = 2; i < fs->clusters + 2; i++) {
+    for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
         if (fs->fat[i].value && !FAT_IS_BAD(fs, fs->fat[i].value) &&
                 !get_owner(fs, i) && !fs->fat[i].prev) {
             prev = 0;
@@ -305,16 +306,14 @@ void reclaim_file(DOS_FS *fs)
     if (verbose)
         printf("Reclaiming unconnected clusters.\n");
 
-    /* TODO: change hard coding number to MACRO definition to improve
-     * readability */
     /* initialize FAT_ENTRY's 'prev' (reference count) field */
-    for (i = 2; i < fs->clusters + 2; i++)
+    for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++)
         fs->fat[i].prev = 0;
 
     /* set 'prev' field to find first cluster of chain, later */
-    for (i = 2; i < fs->clusters + 2; i++) {
+    for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
         next = fs->fat[i].value;
-        if (!get_owner(fs, i) && next && next < fs->clusters + 2) {
+        if (!get_owner(fs, i) && next && next < fs->clusters + FAT_START_ENT) {
             /* i and next cluster is linked, but does not have owner */
             if (get_owner(fs, next) || !fs->fat[next].value ||
                     FAT_IS_BAD(fs, fs->fat[next].value))
@@ -331,7 +330,7 @@ void reclaim_file(DOS_FS *fs)
         /* check orphan cluster's onwer again.
          * And if it has, then set cluster to EOF.
          * if it is changed then check again */
-        for (i = 2; i < fs->clusters + 2; i++) {
+        for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
             if (fs->fat[i].value && !FAT_IS_BAD(fs, fs->fat[i].value) &&
                     !get_owner(fs, i)) {
 
@@ -347,7 +346,7 @@ void reclaim_file(DOS_FS *fs)
     } while (changed);
 
     files = reclaimed = 0;
-    for (i = 2; i < fs->clusters + 2; i++) {
+    for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++) {
         /* if i(cluster) is the first cluster of orphaned cluster chain,
          * make entry in root directory and set i to start cluster */
         if (get_owner(fs, i) == &dummy && !fs->fat[i].prev) {
@@ -385,7 +384,7 @@ uint32_t update_free(DOS_FS *fs)
 
     /* is it possible to calclulate free count in previous routine?
      * (in reclaim_free or reclaim_file) */
-    for (i = 2; i < fs->clusters + 2; i++)
+    for (i = FAT_START_ENT; i < fs->clusters + FAT_START_ENT; i++)
         if (!get_owner(fs, i) && !FAT_IS_BAD(fs, fs->fat[i].value))
             ++free;
 
