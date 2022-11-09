@@ -22,7 +22,13 @@
 void remove_lfn(DOS_FS *fs, DOS_FILE *file);
 void scan_volume_entry(DOS_FS *fs, label_t **head, label_t **last);
 
+static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots);
+static int add_dot_entries(DOS_FS *fs, DOS_FILE *parent, int dots);
+
 static DOS_FILE *root;
+
+#define DOT_ENTRY       0
+#define DOTDOT_ENTRY    1
 
 /* get start field of a dir entry */
 #define FSTART(p, fs) \
@@ -168,15 +174,15 @@ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
         }
     }
     else {
-        DIR_ENT *root;
+        DIR_ENT *root_ent;
         int next_free = 0, scan;
 
-        root = alloc(fs->root_entries * sizeof(DIR_ENT));
-        fs_read(fs->root_start, fs->root_entries * sizeof(DIR_ENT), root);
+        root_ent = alloc(fs->root_entries * sizeof(DIR_ENT));
+        fs_read(fs->root_start, fs->root_entries * sizeof(DIR_ENT), root_ent);
 
         while (next_free < fs->root_entries) {
-            if (IS_FREE(root[next_free].name) &&
-                    root[next_free].attr != VFAT_LN_ATTR)
+            if (IS_FREE(root_ent[next_free].name) &&
+                    root_ent[next_free].attr != VFAT_LN_ATTR)
                 break;
             else
                 next_free++;
@@ -202,7 +208,7 @@ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
 
             for (scan = 0; scan < fs->root_entries; scan++)
                 if (scan != next_free &&
-                        !strncmp((char *)root[scan].name,
+                        !strncmp((char *)root_ent[scan].name,
                             (char *)de->name, MSDOS_NAME))
                     break;
             if (scan == fs->root_entries)
@@ -211,7 +217,7 @@ loff_t alloc_rootdir_entry(DOS_FS *fs, DIR_ENT *de, const char *pattern)
             if (++curr_num >= 10000)
                 die("Unable to create unique name");
         }
-        free(root);
+        free(root_ent);
     }
     ++n_files;
     return offset;
@@ -355,13 +361,22 @@ static int bad_name(unsigned char *name)
 static void drop_file(DOS_FS *fs, DOS_FILE *file)
 {
     uint32_t cluster;
+    int skip_set_owner = 0;
+
+    /* when drop ".", ".." entry, should not change onwer of those entries */
+    if (strncmp((char *)file->dir_ent.name, MSDOS_DOT, LEN_FILE_NAME) ||
+            strncmp((char *)file->dir_ent.name, MSDOS_DOTDOT, LEN_FILE_NAME)) {
+        skip_set_owner = 1;
+    }
 
     remove_lfn(fs, file);
     MODIFY(file, name[0], DELETED_FLAG);
-    for (cluster = FSTART(file, fs);
-            cluster > 0 && cluster < fs->clusters + 2;
-            cluster = next_cluster(fs, cluster)) {
-        set_owner(fs, cluster, NULL);
+    if (!skip_set_owner) {
+        for (cluster = FSTART(file, fs);
+                cluster > 0 && cluster < fs->clusters + 2;
+                cluster = next_cluster(fs, cluster)) {
+            set_owner(fs, cluster, NULL);
+        }
     }
     --n_files;
 }
@@ -399,7 +414,7 @@ static int __find_lfn(DOS_FS *fs, DOS_FILE *parent, loff_t offset,
 
     fs_read(offset, sizeof(DIR_ENT), &de);
 
-    if (de.attr == VFAT_LN_ATTR) {
+    if (de.attr == VFAT_LN_ATTR && !IS_FREE(de.name)) {
         scan_lfn(&de, offset);
         return 0;
     }
@@ -418,11 +433,31 @@ static int find_lfn(DOS_FS *fs, DOS_FILE *parent, DOS_FILE *file)
 {
     uint32_t clus_num;
     unsigned int clus_size;
-    loff_t offset = 0;
+    loff_t offset;
+    DIR_ENT de;
 
     clus_num = FSTART(parent, fs);
     clus_size = fs->cluster_size;
 
+    if (IS_LFN_ENT(file->dir_ent.attr)) {
+        loff_t off = file->offset;
+
+        while (clus_num > 0 && clus_num != -1) {
+            fs_read(off, sizeof(DIR_ENT), &de);
+            if (!IS_LFN_ENT(de.attr) && !IS_VOLUME_LABEL(de.attr)) {
+                file->offset = off;
+                memcpy(&file->dir_ent, &de, sizeof(DIR_ENT));
+                break;
+            }
+
+            off += sizeof(DIR_ENT);
+            off %= clus_size;
+            if (!(off % clus_size))
+                clus_num = next_cluster(fs, clus_num);
+        }
+    }
+
+    offset = 0;
     while (clus_num > 0 && clus_num != -1) {
         if (__find_lfn(fs, parent, cluster_start(fs, clus_num) + offset, file))
             /* found */
@@ -440,6 +475,7 @@ static int find_lfn(DOS_FS *fs, DOS_FILE *parent, DOS_FILE *file)
 void remove_lfn(DOS_FS *fs, DOS_FILE *file)
 {
     DOS_FILE *parent;
+    int save_interactive;
 
     lfn_reset();
     parent = file->parent;
@@ -448,9 +484,15 @@ void remove_lfn(DOS_FS *fs, DOS_FILE *file)
         return;
     }
 
+    /* find_lfn may change DOS_FILE *file data contents.
+     * if file's attribute is LFN, then find_lfn will find DE,
+     * and change it's offset and DE data to DOS_FILE *file */
+    save_interactive = interactive;
+    interactive = 0;
     if (find_lfn(fs, parent, file)) {
         lfn_remove();
     }
+    interactive = save_interactive;
 }
 
 static void auto_rename(DOS_FS *fs, DOS_FILE *file)
@@ -527,49 +569,6 @@ static void rename_file(DOS_FS *fs, DOS_FILE *file)
             }
         }
     }
-}
-
-/* call only in case that directory has entries ".", ".." in check_dir().
- * if it is root directory, called with zero value of dots. */
-static int handle_dot(DOS_FS *fs, DOS_FILE *file, int dots)
-{
-    char *name;
-
-    name = strncmp((char *)file->dir_ent.name, MSDOS_DOT, MSDOS_NAME) ? ".." : ".";
-    if (!(file->dir_ent.attr & ATTR_DIR)) {
-        printf("%s\n  Is a non-directory.\n", path_name(file));
-        if (interactive)
-            printf("1) Drop it\n"
-                    "2) Auto-rename\n"
-                    "3) Rename\n"
-                    "4) Convert to directory\n");
-        else
-            printf("  Auto-renaming it.\n");
-
-        switch (interactive ? get_key("1234", "?") : '2') {
-            case '1':
-                drop_file(fs, file);
-                return 1;
-            case '2':
-                auto_rename(fs, file);
-                printf("  Renamed to %s\n", file_name(file->dir_ent.name));
-                return 0;
-            case '3':
-                rename_file(fs, file);
-                return 0;
-            case '4':
-                MODIFY(file, size, CT_LE_L(0));
-                MODIFY(file, attr, file->dir_ent.attr | ATTR_DIR);
-                break;
-        }
-    }
-
-    if (!dots) {
-        printf("Root contains directory \"%s\". Dropping it.\n", name);
-        drop_file(fs, file);
-        return 1;
-    }
-    return 0;
 }
 
 /*
@@ -822,7 +821,7 @@ static int check_files(DOS_FS *fs, DOS_FILE *start)
 static int check_dir(DOS_FS *fs, DOS_FILE **root, int dots)
 {
     DOS_FILE *parent, **walk, **scan;
-    int dot, dotdot, skip, redo;
+    int skip, redo;
     int good, bad;
 
     if (!*root)
@@ -852,25 +851,9 @@ static int check_dir(DOS_FS *fs, DOS_FILE **root, int dots)
         }
     }
 
-    dot = dotdot = redo = 0;
+    redo = 0;
     walk = root;
     while (*walk) {
-        /* It check ".", ".." entries,
-         * but now DOT/DOTDOT entry does not included in walk path
-         * becuase subdirs() exclude ".", ".." entries, and check_dir() called
-         * only through subdir() */
-        if (!strncmp((char *)((*walk)->dir_ent.name), MSDOS_DOT, MSDOS_NAME) ||
-                !strncmp((char *)((*walk)->dir_ent.name), MSDOS_DOTDOT, MSDOS_NAME)) {
-            if (handle_dot(fs, *walk, dots)) {
-                *walk = (*walk)->next;
-                continue;
-            }
-            if (!strncmp((char *)((*walk)->dir_ent.name), MSDOS_DOT, MSDOS_NAME))
-                dot++;
-            else
-                dotdot++;
-        }
-
         if (!((*walk)->dir_ent.attr & ATTR_VOLUME) &&
                 bad_name((*walk)->dir_ent.name)) {
 
@@ -970,16 +953,10 @@ static int check_dir(DOS_FS *fs, DOS_FILE **root, int dots)
             walk = &(*walk)->next;
         else {
             walk = root;
-            dot = dotdot = redo = 0;
+            redo = 0;
         }
     }
 
-    if (dots && !dot)
-        printf("%s\n  \".\" is missing. Can't fix this yet.\n",
-                path_name(parent));
-    if (dots && !dotdot)
-        printf("%s\n  \"..\" is missing. Can't fix this yet.\n",
-                path_name(parent));
     return 0;
 }
 
@@ -1103,6 +1080,33 @@ static void add_file(DOS_FS *fs, DOS_FILE ***chain, DOS_FILE *parent,
         de.starthi = CT_LE_W((fs->root_cluster >> 16) & 0xffff);
     }
 
+    /* check ".", ".." not in 1st/2nd entry */
+    if (!strncmp((char *)de.name, MSDOS_DOT, LEN_FILE_NAME) ||
+            !strncmp((char *)de.name, MSDOS_DOTDOT, LEN_FILE_NAME)) {
+        int dot = 0;
+
+        if (!strncmp((char *)de.name, MSDOS_DOT, LEN_FILE_NAME)) {
+            dot = 1;
+        }
+        printf("Found invalid %s entry on (%s%s%s)\n",
+                dot ? "dot" : "dotdot", path_name(parent),
+                parent->lfn ? "/" : "",
+                dot ? "." : "..");
+
+        if (interactive)
+            printf("1: Delete.\n"
+                    "2: Leave it.\n");
+        else
+            printf("  Auto-deleting.\n");
+
+        if (!interactive || get_key("12", "?") == '1') {
+            de.name[0] = DELETED_FLAG;
+            fs_write(offset, sizeof(DIR_ENT), &de);
+        }
+
+        return;
+    }
+
     if ((type = file_type(cp, (char *)de.name)) != fdt_none) {
         if (type == fdt_undelete && (de.attr & ATTR_DIR))
             die("Can't undelete directories.");
@@ -1153,19 +1157,41 @@ static int subdirs(DOS_FS *fs, DOS_FILE *parent, FDSC **cp);
 static int scan_dir(DOS_FS *fs, DOS_FILE *this, FDSC **cp)
 {
     DOS_FILE **chain;
-    int i;
+    int offset;
+    int ret = 0;
     uint32_t clu_num;
 
     chain = &this->first;
-    i = 0;
+    offset = 0;
     clu_num = FSTART(this, fs);
+
+    /* check here for first entry "." and second entry ".."
+     * do not call add_file() for ".", ".." entries */
+
+    /* do not check on root directory, because root directory does not have
+     * dot and dotdot entry */
+    if (this != root && clu_num > 0 && clu_num != -1) {
+        /* check first entry */
+        ret = check_dots(fs, this, DOT_ENTRY);
+        if (ret)
+            return -1;
+
+        /* check second entry */
+        ret = check_dots(fs, this, DOTDOT_ENTRY);
+        if (ret)
+            return -1;
+
+        clu_num = FSTART(this, fs);
+        offset = sizeof(DIR_ENT) * 2;   /* first, second entry skip */
+    }
+
     new_dir();
 
     while (clu_num > 0 && clu_num != -1) {
         add_file(fs, &chain, this,
-                cluster_start(fs, clu_num) + (i % fs->cluster_size), cp);
-        i += sizeof(DIR_ENT);
-        if (!(i % fs->cluster_size))
+                cluster_start(fs, clu_num) + (offset % fs->cluster_size), cp);
+        offset += sizeof(DIR_ENT);
+        if (!(offset % fs->cluster_size))
             if ((clu_num = next_cluster(fs, clu_num)) == 0 || clu_num == -1)
                 break;
     }
@@ -1186,11 +1212,8 @@ static int subdirs(DOS_FS *fs, DOS_FILE *parent, FDSC **cp)
 
     for (walk = parent ? parent->first : root; walk; walk = walk->next)
         if (walk->dir_ent.attr & ATTR_DIR)
-            /* TODO: where is the routine that handle DOT / DOTDOT? */
-            if (strncmp((char *)(walk->dir_ent.name), MSDOS_DOT, MSDOS_NAME) &&
-                    strncmp((char *)(walk->dir_ent.name), MSDOS_DOTDOT, MSDOS_NAME))
-                if (scan_dir(fs, walk, file_cd(cp, (char *)(walk->dir_ent.name))))
-                    return 1;
+            if (scan_dir(fs, walk, file_cd(cp, (char *)(walk->dir_ent.name))))
+                return 1;
     return 0;
 }
 
@@ -1927,6 +1950,306 @@ int check_volume_label(DOS_FS *fs)
 exit:
     clean_label(&label_head, &label_last);
     return ret;
+}
+
+/* allocate new cluster and add dot / dotdot entry */
+static int add_dot_entries(DOS_FS *fs, DOS_FILE *parent, int dots)
+{
+    loff_t offset = 0;
+    loff_t start_offset;
+    loff_t new_offset;
+
+    uint32_t start_clus;    /* start cluster number of parent */
+    uint32_t new_clus;      /* new allocated cluster number */
+    uint32_t next_clus;     /* original next cluster chain of start_cluster */
+
+    DOS_FILE dot_file;
+    DOS_FILE *file;
+    DIR_ENT *de;
+    DIR_ENT *p_de;
+    char *entry_name;
+
+    int i;
+    int ent_size;
+
+    file = &dot_file;
+    de = &dot_file.dir_ent;
+    p_de = &parent->dir_ent;
+
+    /* find free cluster */
+    for (new_clus = FAT_START_ENT + 1; new_clus != FAT_START_ENT; new_clus++) {
+        if (new_clus >= fs->clusters + FAT_START_ENT)
+            new_clus = FAT_START_ENT;
+        if (!fs->fat[new_clus].value)
+            break;
+    }
+
+    if (new_clus == FAT_START_ENT) {
+        die("Can't find free cluster\n");
+    }
+
+    /* allocate new cluster and make it second cluster,
+     * move entries of first cluster to new cluster,
+     * and add dot / dotdot entry on first cluster */
+
+    ent_size = sizeof(DIR_ENT);
+
+    start_clus = FSTART(parent, fs);
+    new_offset = cluster_start(fs, new_clus);
+    start_offset = cluster_start(fs, start_clus);
+
+    /* check for 1st, 2nd entry of start_cluster */
+    for (i = 0; i < (2 * ent_size); i += ent_size) {
+        fs_read(start_offset + i, ent_size, de);
+        if (strncmp((char *)de->name, MSDOS_DOT, LEN_FILE_NAME) &&
+                strncmp((char *)de->name, MSDOS_DOTDOT, LEN_FILE_NAME)) {
+            fs_write(new_offset + i, ent_size, de);
+            de->name[0] = DELETED_FLAG;
+            fs_write(start_offset + i, ent_size, de);
+        }
+        else {
+            memset(de, 0, sizeof(DIR_ENT));
+            fs_write(new_offset + i, ent_size, de);
+        }
+    }
+
+    /* start on 3rd entry */
+    for (i = (2 * ent_size); i < fs->cluster_size; i += ent_size) {
+        /* copy entries of start_cluster to new_cluster
+         * except ".", ".." entries */
+        fs_read(start_offset + i, ent_size, de);
+        fs_write(new_offset + i, ent_size, de);
+        de->name[0] = DELETED_FLAG;
+        fs_write(start_offset + i, ent_size, de);
+    }
+
+    next_clus = fs->fat[start_clus].value;
+    set_fat(fs, start_clus, new_clus);
+    set_fat(fs, new_clus, next_clus);
+    set_owner(fs, new_clus, get_owner(fs, start_clus));
+
+    if (dots == DOT_ENTRY) {
+        /* first entry offset */
+        offset = 0;
+        entry_name = MSDOS_DOT;
+    }
+    else {
+        /* second entry offset */
+        offset = ent_size;
+        entry_name = MSDOS_DOTDOT;
+    }
+
+    /* make and write dot / dotdot DE entries */
+    memset(de, 0, ent_size);
+    memcpy(de->name, entry_name, LEN_FILE_NAME);
+    de->attr = ATTR_DIR;
+    de->ctime_ms = p_de->ctime_ms;
+    de->ctime = p_de->ctime;
+    de->cdate = p_de->cdate;
+    de->adate = p_de->adate;
+    de->time = p_de->time;
+    de->date = p_de->date;
+
+    file->offset = start_offset + offset;
+    fs_write(file->offset, ent_size, de);
+
+    if (dots == DOT_ENTRY) {
+        MODIFY_START(file, start_clus, fs);
+    }
+    else {
+        /* dots == DOTDOT_ENTRY */
+        if (parent->parent == root) {
+            MODIFY_START(file, 0, fs);
+        }
+        else {
+            MODIFY_START(file, FSTART(parent->parent, fs), fs);
+        }
+    }
+
+    return 0;
+}
+
+static int check_dots(DOS_FS *fs, DOS_FILE *parent, int dots)
+{
+    uint32_t start_clus;
+    uint32_t clus_num;
+    loff_t offset;
+    char *entry_name;
+    DOS_FILE file;
+    DOS_FILE *dot_file;
+    DIR_ENT *p_de;
+    DIR_ENT *de;
+
+    dot_file = &file;
+
+    if (parent == root) {
+        /* 'parent' is root directory's entry,
+         * root directory does not have ".", ".." entries. */
+        die("%s can't be called on root directory.", __func__);
+        return -1;
+    }
+
+    clus_num = FSTART(parent, fs);
+    if (dots == DOT_ENTRY) {
+        entry_name = MSDOS_DOT;
+        start_clus = clus_num;
+        offset = 0;
+    }
+    else {
+        entry_name = MSDOS_DOTDOT;
+        start_clus = FSTART(parent->parent, fs);
+        offset = sizeof(DIR_ENT);
+    }
+
+    memset(dot_file, 0, sizeof(DOS_FILE));
+    dot_file->parent = parent;
+    dot_file->offset = cluster_start(fs, clus_num) + offset;
+    fs_read(dot_file->offset, sizeof(DIR_ENT), &dot_file->dir_ent);
+
+    if (dots == DOTDOT_ENTRY && parent->parent == root) {
+        /* parent of 'parent' is root directory */
+        if (start_clus != fs->root_cluster) {
+            die("root_cluster is different with root start cluster\n");
+        }
+        start_clus = 0;
+    }
+
+    p_de = &parent->dir_ent;
+    de = &dot_file->dir_ent;
+    if (strncmp((char *)de->name, entry_name, LEN_FILE_NAME) == 0) {
+        if (list)
+            printf("Checking file %s\n", path_name(dot_file));
+
+        if (!(de->attr & ATTR_DIR)) {
+            printf("%s\n  Fixing %s entry's('%s') invalid attribute.\n",
+                    path_name(dot_file->parent),
+                    (dots == DOT_ENTRY) ? "first" : "second",
+                    (dots == DOT_ENTRY) ? "." : "..");
+            MODIFY(dot_file, attr, ATTR_DIR);
+        }
+
+        if (start_clus != FSTART(dot_file, fs)) {
+            printf("%s\n  Fixing %s entry's('%s') invalid start cluster.\n",
+                    path_name(dot_file->parent),
+                    (dots == DOT_ENTRY) ? "first" : "second",
+                    (dots == DOT_ENTRY) ? "." : "..");
+            MODIFY_START(dot_file, start_clus, fs);
+        }
+
+        if (memcmp(&p_de->ctime_ms, &de->ctime_ms, 7) ||
+                    memcmp(&p_de->time, &de->time, 4)) {
+            /* copy ctime_ms, ctime, cdate, adate, time, date from self */
+            MODIFY(dot_file, ctime_ms, p_de->ctime_ms);
+            MODIFY(dot_file, ctime, p_de->ctime);
+            MODIFY(dot_file, cdate, p_de->cdate);
+            MODIFY(dot_file, adate, p_de->adate);
+            MODIFY(dot_file, time, p_de->time);
+            MODIFY(dot_file, date, p_de->date);
+        }
+        return 0;
+    }
+
+    /* dot/dotdot entry is not exist */
+    /* 1. deleted case
+     * 2. other entry is located in first/second entry */
+    if (IS_FREE(de->name)) {
+        printf("%s\n  %s entry is expected as '%s',"
+                " but is free or deleted.\n",
+                path_name(dot_file->parent),
+                (dots == DOT_ENTRY) ? "first" : "second",
+                (dots == DOT_ENTRY) ? "." : "..");
+        if (interactive)
+            printf("1) Create %s entry\n"
+                    "2) Drop parent entry\n",
+                    (dots == DOT_ENTRY) ? "first" : "second");
+        else
+            printf("  Auto-creating entry.\n");
+
+        switch (interactive ? get_key("12", "?") : '1') {
+            case '1':
+            {
+                /* check second entry status before setting "." in first entry
+                 * if ".." can't be set in second entry
+                 * because of other valid entry,
+                 * call add_dot_entries() to allocate new cluster and
+                 * set both ".", ".." entries */
+                if (dots == DOT_ENTRY) {
+                    DIR_ENT next_de;
+
+                    /* read next(second) entry */
+                    fs_read(offset + sizeof(DIR_ENT), sizeof(DIR_ENT), &next_de);
+
+                    if (strncmp((char *)de->name, MSDOS_DOTDOT, LEN_FILE_NAME) &&
+                            !IS_FREE(next_de.name)) {
+
+                        add_dot_entries(fs, parent, dots);
+                        return 0;
+                    }
+                }
+
+                memcpy(de->name, entry_name, LEN_FILE_NAME);
+                de->attr = ATTR_DIR;
+                de->ctime_ms = p_de->ctime_ms;
+                de->ctime = p_de->ctime;
+                de->cdate = p_de->cdate;
+                de->adate = p_de->adate;
+                de->time = p_de->time;
+                de->date = p_de->date;
+                fs_write(dot_file->offset, sizeof(dot_file->dir_ent), de);
+                MODIFY_START(dot_file, start_clus, fs);
+                break;
+            }
+            case '2':
+                drop_file(fs, parent);
+                return 1;
+        }
+        return 0;
+    }
+
+    /* first/second entry is not ".", "..", and valid LFN/DE.
+     * allocate new cluster for first/second entry,
+     * write ".", ".." entry to allocated new cluster. */
+
+    printf("%s\n  %s entry is expected as '%s', but is '%s'.\n",
+            path_name(dot_file),
+            (dots == DOT_ENTRY) ? "First" : "Second",
+            (dots == DOT_ENTRY) ? "." : "..",
+            IS_LFN_ENT(de->attr) ? "LFN entry" : file_name(de->name));
+
+    if (interactive) {
+        printf("1) Drop '%s' entry\n"
+                "2) Drop parent entry\n"
+                "3) Add dots entries to first/second\n",
+                file_name(de->name));
+    }
+    else
+        printf("  Auto-adding dots entries to first/second.\n");
+
+    switch (interactive ? get_key("123", "?") : '3') {
+        case '1':
+            offset = dot_file->offset;
+            drop_file(fs, dot_file);
+            dot_file->offset = offset;
+
+            memcpy(de->name, entry_name, LEN_FILE_NAME);
+            de->attr = ATTR_DIR;
+            de->ctime_ms = p_de->ctime_ms;
+            de->ctime = p_de->ctime;
+            de->cdate = p_de->cdate;
+            de->adate = p_de->adate;
+            de->time = p_de->time;
+            de->date = p_de->date;
+            fs_write(dot_file->offset, sizeof(DIR_ENT), de);
+            MODIFY_START(dot_file, start_clus, fs);
+            break;
+        case '2':
+            drop_file(fs, parent);
+            return 1;
+        case '3':
+            add_dot_entries(fs, parent, dots);
+            break;
+    }
+    return 0;
 }
 
 /* Local Variables: */
