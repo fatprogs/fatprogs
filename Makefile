@@ -1,5 +1,5 @@
 #
-# Makefile for dosfstools (mkdosfs, dosfsck, dosfslabel)
+# Makefile for dosfstools (mkdosfs, dosfsck, dosfslabel and dosfsdump)
 #
 
 TOPDIR := $(shell pwd)

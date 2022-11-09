@@ -2,12 +2,15 @@
 COMMON_OBJECTS = common.o
 FSCK_OBJECTS = boot.o check.o fat.o file.o io.o lfn.o
 
-all: dosfsck dosfslabel mkdosfs
+all: dosfsck dosfslabel mkdosfs dosfsdump
 
 dosfsck: $(COMMON_OBJECTS) $(FSCK_OBJECTS) dosfsck.o
 	$(CC) -o $@ $(LDFLAGS) $^
 
 dosfslabel: $(COMMON_OBJECTS) $(FSCK_OBJECTS) dosfslabel.o
+	$(CC) -o $@ $(LDFLAGS) $^
+
+dosfsdump: $(COMMON_OBJECTS) dosfsdump.o
 	$(CC) -o $@ $(LDFLAGS) $^
 
 mkdosfs: $(COMMON_OBJECTS) mkdosfs.o
@@ -23,6 +26,7 @@ install: dosfsck mkdosfs
 	install -m 755 mkdosfs $(SBINDIR)
 	install -m 644 mkdosfs.8 $(MANDIR)
 	install -m 755 dosfslabel $(SBINDIR)
+	install -m 755 dosfsdump $(SBINDIR)
 	rm -f $(SBINDIR)/fsck.msdos
 	rm -f $(SBINDIR)/fsck.vfat
 	ln -s dosfsck $(SBINDIR)/fsck.msdos
@@ -42,7 +46,7 @@ clean:
 	rm -f *.o *.s *.i *~ \#*# tmp_make .#* .new*
 
 distclean: clean
-	rm -f *.a dosfsck dosfslabel mkdosfs
+	rm -f *.a dosfsck dosfslabel dosfsdump mkdosfs
 
 dep:
 	sed '/\#\#\# Dependencies/q' <Makefile >tmp_make
