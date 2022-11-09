@@ -268,7 +268,7 @@ static void dump_data(DOS_FS *fs)
 
     offset = clus_offset % fs->cluster_size;
     if (offset) {
-        printf("WARN: root cluster does not aligned cluster size\n");
+        fprintf(stderr, "WARN: root cluster does not aligned cluster size\n");
     }
 
     if (fs->root_cluster) {
@@ -350,7 +350,7 @@ static void dump__read_fat(DOS_FS *fs)
 
             if (clus_num >= fs->clusters + FAT_START_ENT &&
                     clus_num < FAT_MIN_BAD(fs)) {
-                printf("WARN: Cluster %u out of range (%u > %u). Setting to EOF.\n",
+                fprintf(stderr, "WARN: Cluster %u out of range (%u > %u). Setting to EOF.\n",
                         i, clus_num, fs->clusters + FAT_START_ENT - 1);
                 continue;
             }
@@ -442,17 +442,17 @@ static int dump__read_boot(DOS_FS *fs, struct boot_sector *b)
     /* read device size */
     device_size = lseek(fd_in, 0, SEEK_END);
     if (device_size < 0) {
-        printf("lseek error (%s)\n", strerror(errno));
+        fprintf(stderr, "lseek error (%s)\n", strerror(errno));
         exit(-1);
     }
 
     if (lseek(fd_out, device_size, SEEK_SET) != device_size) {
-        printf("lseek error (%s)\n", strerror(errno));
+        fprintf(stderr, "lseek error (%s)\n", strerror(errno));
         exit(-1);
     }
 
     if (write(fd_out, "0", 1) < 0) {
-        printf("write error (%s)\n", strerror(errno));
+        fprintf(stderr, "write error (%s)\n", strerror(errno));
         exit(-1);
     };
 
@@ -462,12 +462,12 @@ static int dump__read_boot(DOS_FS *fs, struct boot_sector *b)
                 sizeof(struct boot_sector), 0, __LINE__, __func__);
 
     if (!is_valid_fat(fs, b)) {
-        printf("Device(or file) is not valid FAT filesystem\n");
+        fprintf(stderr, "Device(or file) is not valid FAT filesystem\n");
         exit(-1);
     }
 
     if (b->boot_sign != CT_LE_W(BOOT_SIGN)) {
-        printf("Filesystem does not have FAT32 magic number(0x%d)\n", CF_LE_W(b->boot_sign));
+        fprintf(stderr, "Filesystem does not have FAT32 magic number(0x%d)\n", CF_LE_W(b->boot_sign));
         exit(-1);
     }
 
@@ -633,7 +633,7 @@ int main(int argc, char *argv[])
             case 'o':   /* specify output file */
                 memset(outfile, 0, 255);
                 if (strlen(optarg) > 255) {
-                    printf("!! Output filename length is longer than 255\n");
+                    fprintf(stderr, "!! Output filename length is longer than 255\n");
                     usage(argv[0]);
                     exit(EXIT_SYNTAX_ERROR);
                 }
@@ -641,7 +641,7 @@ int main(int argc, char *argv[])
                 break;
             case 'v':
                 verbose = 1;
-                printf("dosfsdump " VERSION " (" VERSION_DATE ")\n");
+                fprintf(stderr, "dosfsdump " VERSION " (" VERSION_DATE ")\n");
                 break;
             case 'd':
                 dump_flag = DUMP_ALL;
@@ -662,13 +662,13 @@ int main(int argc, char *argv[])
 
     fd_in = open(argv[optind], O_RDONLY);
     if (fd_in < 0) {
-        printf("Can't open device('%s')\n", argv[optind]);
+        fprintf(stderr, "Can't open device('%s')\n", argv[optind]);
         exit(EXIT_FAILURE);
     }
 
     fd_out = open(outfile, O_RDWR | O_CREAT | O_TRUNC, 0666);
     if (fd_out < 0) {
-        printf("Can't open output file('%s')\n", outfile);
+        fprintf(stderr, "Can't open output file('%s')\n", outfile);
         exit(EXIT_FAILURE);
     }
 
@@ -687,7 +687,7 @@ int main(int argc, char *argv[])
     dump_reserved(&fs);
 
     if (dump_flag <= DUMP_RESERVED) {
-        printf("Dump reserved sectors only!\n");
+        fprintf(stderr, "Dump reserved sectors only!\n");
         exit(EXIT_SUCCESS);
     }
 
@@ -696,7 +696,7 @@ int main(int argc, char *argv[])
     free_mem(buf_sec);
 
     if (dump_flag <= DUMP_FAT) {
-        printf("Dump reserved sectors and FATs only!\n");
+        fprintf(stderr, "Dump reserved sectors and FATs only!\n");
         exit(EXIT_SUCCESS);
     }
 
@@ -717,5 +717,5 @@ int main(int argc, char *argv[])
 
     close(fd_in);
     close(fd_out);
-    printf("Done: dump \"%s\" to \"%s\"\n", argv[optind], outfile);
+    fprintf(stderr, "Done: dump \"%s\" to \"%s\"\n", argv[optind], outfile);
 }
