@@ -310,22 +310,32 @@ static void truncate_file(DOS_FS *fs,DOS_FILE *file, uint32_t clusters)
 
 static void auto_rename(DOS_FILE *file)
 {
-    DOS_FILE *first,*walk;
+    DOS_FILE *first, *walk;
     uint32_t number;
+    char name[MSDOS_NAME + 1];
 
-    if (!file->offset) return;	/* cannot rename FAT32 root dir */
+    if (!file->offset)
+        return;	/* cannot rename FAT32 root dir */
+
     first = file->parent ? file->parent->first : root;
     number = 0;
     while (1) {
-        sprintf(file->dir_ent.name, "FSCK%04d", number / 1000);
-        sprintf(file->dir_ent.name, "%03d", number % 1000);
+        snprintf(name, MSDOS_NAME + 1, "FSCK%04d%03d",
+                number / 1000, number % 1000);
+        memcpy(file->dir_ent.name, name, MSDOS_NAME);
+
         for (walk = first; walk; walk = walk->next)
-            if (walk != file && !strncmp(walk->dir_ent.name,file->dir_ent.
-                        name,MSDOS_NAME)) break;
+            if (walk != file &&
+                    !strncmp(walk->dir_ent.name,
+                        file->dir_ent.name, MSDOS_NAME)) {
+                break;
+            }
+
         if (!walk) {
-            fs_write(file->offset,MSDOS_NAME,file->dir_ent.name);
+            fs_write(file->offset, MSDOS_NAME, file->dir_ent.name);
             return;
         }
+
         number++;
         if (number > 9999999) {
             die("Too many files need repair.");
@@ -379,7 +389,7 @@ static int handle_dot(DOS_FS *fs,DOS_FILE *file,int dots)
                 return 1;
             case '2':
                 auto_rename(file);
-                printf("  Renamed to %s\n",file_name(file->dir_ent.name));
+                printf("  Renamed to %s\n", file_name(file->dir_ent.name));
                 return 0;
             case '3':
                 rename_file(file);
@@ -588,9 +598,14 @@ static int check_dir(DOS_FS *fs,DOS_FILE **root,int dots)
             if (!strncmp((*walk)->dir_ent.name,MSDOS_DOT,MSDOS_NAME)) dot++;
             else dotdot++;
         }
+
         if (!((*walk)->dir_ent.attr & ATTR_VOLUME) &&
                 bad_name((*walk)->dir_ent.name)) {
-            printf("%s\n  Bad file name.\n",path_name(*walk));
+
+            printf("%s\n", path_name(*walk));
+            printf("  Bad file name (%s).\n",
+                    file_name((*walk)->dir_ent.name));
+
             if (interactive)
                 printf("1) Drop file\n2) Rename file\n3) Auto-rename\n"
                         "4) Keep it\n");
@@ -606,8 +621,8 @@ static int check_dir(DOS_FS *fs,DOS_FILE **root,int dots)
                     break;
                 case '3':
                     auto_rename(*walk);
-                    printf("  Renamed to %s\n",file_name((*walk)->dir_ent.
-                                name));
+                    printf("  Renamed to %s\n",
+                            file_name((*walk)->dir_ent.name));
                     break;
                 case '4':
                     break;
@@ -640,23 +655,23 @@ static int check_dir(DOS_FS *fs,DOS_FILE **root,int dots)
                             continue;
                         case '3':
                             rename_file(*walk);
-                            printf("  Renamed to %s\n",path_name(*walk));
+                            printf("  Renamed to %s\n", path_name(*walk));
                             redo = 1;
                             break;
                         case '4':
                             rename_file(*scan);
-                            printf("  Renamed to %s\n",path_name(*walk));
+                            printf("  Renamed to %s\n", path_name(*walk));
                             redo = 1;
                             break;
                         case '5':
                             auto_rename(*walk);
-                            printf("  Renamed to %s\n",file_name((*walk)->dir_ent.
-                                        name));
+                            printf("  Renamed to %s\n",
+                                    file_name((*walk)->dir_ent.name));
                             break;
                         case '6':
                             auto_rename(*scan);
-                            printf("  Renamed to %s\n",file_name((*scan)->dir_ent.
-                                        name));
+                            printf("  Renamed to %s\n",
+                                    file_name((*scan)->dir_ent.name));
                             break;
                     }
                 }
