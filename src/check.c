@@ -698,7 +698,8 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
     for (curr = FSTART(file, fs) ? FSTART(file, fs) : -1;
             curr != -1; curr = next_clus) {
         next_clus = next_cluster(fs, curr);
-        if (!next_clus || FAT_IS_BAD(fs, next_clus)) {
+        if (!next_clus || FAT_IS_BAD(fs, next_clus) ||
+                (next_clus != -1 && next_clus >= max_clus_num)) {
             printf("%s\n  Contains a %s cluster (%u). Assuming EOF.\n",
                     path_name(file), next_clus ? "bad" : "free", curr);
             if (prev)
@@ -722,7 +723,19 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
                     CF_LE_L(file->dir_ent.size),
                     (unsigned long long)clusters * fs->cluster_size,
                     CF_LE_L(file->dir_ent.size));
-            truncate_file(fs, file, clusters);
+            /*
+             * TODO: check if it is need to call truncate()?
+             * calling truncate() takes more time and
+             * it seems not to affect fsck overall result
+             * truncate_file(fs, file, clusters);
+             */
+            MODIFY(file, size,
+                    CT_LE_L((unsigned long long)clusters * fs->cluster_size));
+            if (prev)
+                set_fat(fs, prev, -1);
+            else
+                MODIFY_START(file, 0, fs);
+
             break;
         }
 
