@@ -92,15 +92,20 @@ void fs_read(loff_t pos, int size, void *data)
     int got;
 
     if (llseek(fd, pos, SEEK_SET) != pos)
-        pdie("Seek to %lld", pos);
+        pdie("Seek to %lld(%d,%s)", pos, __LINE__, __func__);
 
     if ((got = read(fd, data, size)) < 0)
-        pdie("Read %d bytes at %lld", size, pos);
+        die("Got %d bytes instead of %d at %lld(%d,%s)",
+                got, size, pos, __LINE__, __func__);
 
     if (got != size)
         die("Got %d bytes instead of %d at %lld", got, size, pos);
 
     for (walk = changes; walk; walk = walk->next) {
+        if (pos + size < walk->pos) {
+            break;
+        }
+
         /* in case that new read area overlap with previous read data */
         if (walk->pos < pos + size && walk->pos + walk->size > pos) {
             if (walk->pos < pos)
@@ -119,41 +124,226 @@ int fs_test(loff_t pos, int size)
     int okay;
 
     if (llseek(fd, pos, SEEK_SET) != pos)
-        pdie("Seek to %lld", pos);
+        pdie("Seek to %lld(%d,%s)", pos, __LINE__, __func__);
+
     scratch = alloc_mem(size);
     okay = read(fd, scratch, size) == size;
     free_mem(scratch);
     return okay;
 }
 
+static CHANGE *merge_change(CHANGE *old, CHANGE *new)
+{
+    CHANGE *merge;
+    int size;
+
+    merge = alloc_mem(sizeof(CHANGE));
+
+    merge->pos = min(old->pos, new->pos);
+    merge->size = max(old->pos + old->size, new->pos + new->size) -
+        min(old->pos, new->pos);
+    merge->data = alloc_mem(merge->size);
+
+    /*
+     * new :         |--------|
+     * old : |----------|
+     */
+    if (merge->pos == old->pos) {
+        size = new->pos - old->pos;
+        memcpy(merge->data, old->data, size);
+        memcpy(merge->data + size, new->data, new->size);
+    }
+    /*
+     * new : |--------|
+     * old:        |----------|
+     */
+    else {
+        size = (old->pos + old->size) - (new->pos + new->size);
+        memcpy(merge->data, new->data, new->size);
+        memcpy(merge->data + new->size, old->data + (old->size - size), size);
+    }
+    return merge;
+}
+
+static void free_change(CHANGE *del)
+{
+    if (del) {
+        free_mem(del->data);
+        free_mem(del);
+    }
+}
+
+static void add_change_list(CHANGE *prev, CHANGE *new, CHANGE *next)
+{
+    if (prev) {
+        new->next = next;
+        prev->next = new;
+    }
+    else {
+        new->next = changes;
+        changes = new;
+    }
+
+    if (!next) {
+        if (last == prev)
+            last = new;
+    }
+}
+
+static void del_change_list(CHANGE *prev, CHANGE *del)
+{
+    if (prev) {
+        prev->next = del->next;
+    }
+    else {
+        changes = del->next;
+    }
+
+    if (last == del) {
+        last = prev;
+    }
+}
+
+void print_changes(void)
+{
+    CHANGE *walk;
+    CHANGE *next = NULL;
+    int i;
+
+    printf("Wrong data in CHANGES list : ");
+    if (changes == NULL)
+        printf("None");
+    else
+        printf("\n");
+
+    for (i = 0, walk = changes; walk; walk = walk->next, i++) {
+        next = walk->next;
+        if (!next) {
+            break;
+        }
+
+        if ((walk->pos >= next->pos) || (walk->pos + walk->size > next->pos)) {
+            printf("%5d : pos %8ld, size %8d\n", i, walk->pos, walk->size);
+            printf("%5d : pos %8ld, size %8d\n", i + 1, next->pos, next->size);
+        }
+    }
+}
+
 void fs_write(loff_t pos, int size, void *data)
 {
     CHANGE *new;
+    CHANGE *walk;
+    CHANGE *prev;
+    CHANGE *merge;
     int did;
 
     if (write_immed) {
         did_change = 1;
         if (llseek(fd, pos, SEEK_SET) != pos)
-            pdie("Seek to %lld", pos);
+            pdie("Seek to %lld(%d,%s)", pos, __LINE__, __func__);
 
         if ((did = write(fd, data, size)) == size)
             return;
         if (did < 0)
-            pdie("Write %d bytes at %lld", size, pos);
+            pdie("Write %d bytes at %lld(%d,%s)", size, pos, __LINE__, __func__);
 
         die("Wrote %d bytes instead of %d at %lld", did, size, pos);
     }
+
     new = alloc_mem(sizeof(CHANGE));
     new->pos = pos;
     memcpy(new->data = alloc_mem(new->size = size), data, size);
     new->next = NULL;
 
-    if (last)
-        last->next = new;
-    else
+    /* for first entry */
+    if (!last) {
         changes = new;
+        last = new;
+        return;
+    }
 
-    last = new;
+    prev = NULL;
+    for (walk = changes; walk; prev = walk, walk = walk->next) {
+        if (pos >= walk->pos + walk->size) {
+            CHANGE *next;
+            /* new  :           |--------|
+             * walk : |--------|
+             * Include when walk is last entry of list.
+             * -> add new */
+            next = walk->next;
+            if (!next || ((pos + size) <= next->pos)) {
+                add_change_list(walk, new, next);
+                break;
+            }
+            continue;
+        }
+
+        /* new : |--------|
+         * walk:           |---------|
+         * Include walk is first entry of list.
+         * -> add new */
+        if (pos + size <= walk->pos) {
+            add_change_list(prev, new, walk);
+            break;
+        }
+
+        if (pos <= walk->pos) {
+            /* new : |-------------------------|
+             * walk:     |--------|      |--------|
+             * -> use new & delete walk */
+            if (pos + size >= walk->pos + walk->size) {
+                add_change_list(prev, new, walk);
+                del_change_list(new, walk);
+
+                free_change(walk);
+
+                /* walk->next's area also may be overlapped by new. Check next. */
+                continue;
+            }
+            /* new : |--------|
+             * walk: |----------------|
+             * -> use walk & copy new data, delete new */
+            else if (pos == walk->pos) {
+                memcpy(walk->data, new->data, new->size);
+                free_change(new);
+                break;
+            }
+            /* new : |--------|
+             * walk:        |---------|
+             * -> merge & delete walk/new */
+            else {
+                merge = merge_change(walk, new);
+                add_change_list(prev, merge, walk);
+                del_change_list(merge, walk);
+
+                free_change(walk);
+                free_change(new);
+                break;
+            }
+        }
+        else {
+            /* new :         |--------|
+             * walk: |----------|
+             * -> merge & delete walk/new */
+            if (pos + size > walk->pos + walk->size) {
+                merge = merge_change(walk, new);
+                add_change_list(prev, merge, walk);
+                del_change_list(merge, walk);
+
+                free_change(walk);
+                free_change(new);
+                break;
+            }
+            /* new :         |--------|
+             * walk: |-----------------|
+             * -> user walk & delete new */
+            else {
+                memcpy(walk->data + (pos - walk->pos), new->data, new->size);
+                free_change(new);
+                break;
+            }
+        }
+    }
 }
 
 static void fs_flush(void)

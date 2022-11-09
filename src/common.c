@@ -107,6 +107,11 @@ int min(int a, int b)
     return a < b ? a : b;
 }
 
+int max(int a, int b)
+{
+    return a < b ? b : a;
+}
+
 char get_key(char *valid, char *prompt)
 {
     int ch, okay;

@@ -53,6 +53,8 @@ void qfree(void **root);
 
 /* Returns the smaller integer value of a and b. */
 int min(int a, int b);
+/* Returns the larger integer value of a and b. */
+int max(int a, int b);
 
 /* Displays PROMPT and waits for user input. Only characters in VALID are
    accepted. Terminates the program on EOF. Returns the character. */

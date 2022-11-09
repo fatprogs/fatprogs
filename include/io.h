@@ -41,6 +41,9 @@ int fs_close(int write);
 /* Determines whether the file system has changed. See fs_close. */
 int fs_changed(void);
 
+/* Print wrong data in CHNAGE lists */
+void print_changes(void);
+
 /* Major number of device (0 if file) and size (in 512 byte sectors) */
 extern unsigned device_no;
 

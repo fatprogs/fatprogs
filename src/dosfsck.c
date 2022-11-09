@@ -170,8 +170,12 @@ int main(int argc, char **argv)
     file_unused();
 
     clean_dirty_flag(&fs);
-    if (verbose)
+    if (verbose) {
         print_mem();
+#ifdef DEBUG
+        print_changes();
+#endif
+    }
     qfree(&mem_queue);
 
     if (verify) {
