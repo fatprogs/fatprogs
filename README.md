@@ -3,13 +3,13 @@
 fatprogs is FAT32 utility project by being developed from dosfstools v2.11,
 which is released under the last version of GPL v2 license.
 
-fatprogs support mkdosfs, dosfsck, dosfslabel like dosfstoos and additionally
+fatprogs support mkdosfs, dosfsck, dosfslabel like dosfstools and additionally
 dosfsdump for debugging.
 
 dosfstools is excellent project and developed and verified for long time.
 But, found some issues when it is applied to embedded device. In test with 4K
-cluster on 32G volume, checked that dosfstools uses at least 120M memory above.
-So, it may be hard to use for embedded device with small resource.
+cluster on 32G volume, checked that dosfstools uses very large memory.(80M above)
+So, it may be hard to use for embedded device with small resources.
 
 Also, there is even issue of license. Many embedded companies are hesitant to
 use software with a GPL v3 due to it's restriction. So some utilities including
@@ -19,21 +19,12 @@ dosfstools are also provided as a yocto meta layer to preserve GPL v2 license.
 To resolve above issues, fatprogs is developed from dosfstools v2.11 and
 patches of distribution vendors based on v2.11. And found missing features
 through comparison of corrupted images' recovery results with serveral FAT32
-tools existing in linux and Windows chkdsk utility.
+tools existing in linux and Windows chkdsk utility. Also I checked published
+documents for fat32 specification.
 
 After adding missing features, optimized to use less memory. Verified the MAX RSS
 memory was reduced by about 90% compared to latest dosfstools version(v4.2).
 Tested results are attached below.
-
-
-# Report & Contribution
-Reporting issues and suggesting features for fatprogs are always welcome.
-License of fatprogs is GPL-2.0. So, to avoid license violation and
-compatibility, fatprogs can't apply code with GPL-3.0 and other license
-which conflict with GPL-2.0.
-
-Somebody who contribute to fatprogs should be careful for that. You can use
-fosslight to check license for free. (https://fosslight.org)
 
 # Build & Installation
 
@@ -62,7 +53,7 @@ statement in your bb/bbappend file to build fatprogs, which refer to dosfstools 
 in meta-gplv2.
 
 ```
-SRC_URI = "git://github.com/jaysim/fatprogs.git;branch=main;protocol=https"
+SRC_URI = "git://github.com/fatprogs-org/fatprogs.git;branch=main;protocol=https"
 
 S = "${WORKDIR}/git"
 
@@ -83,12 +74,9 @@ fatprogs was tested on x86-64, aarch64. fatprogs built and tested
 on full 64bit on x86-64, and with -m32 option on aarch64.
 
 ## Corrupted Images
-test script for fatprogs are in
-git@github.com:jaysim/fat32\_bad_images.git repository.
+test script for fatprogs are in [here](https://github.com/jaysim/fat32_bad_images)
 
-Corrupted images can't share through github, because of github size limitation.
-So, just share raw data of corrupte images and test script.
-Tested images deatils are described in README file above repository.
+Tested images deatils are described in README file above link.
 
 ## Comparison of memory usage
 One of developement goal of fatprogs was use less resources. The following
@@ -131,8 +119,16 @@ dosfstools need about 100M memory in worst case, so embedded device might not
 be able to handle this type of FAT32 device. Of course, fatprogs memory also
 need to optimize more.
 
-TODO
-====
-* more optimization for logic of traversing file tree and memory.
+# Report & Contribution
+Reporting issues and suggesting features for fatprogs are always welcome.
+License of fatprogs is GPL-2.0. So, to avoid license violation and
+compatibility, fatprogs can't apply code with GPL-3.0 and other license
+which conflict with GPL-2.0.
+
+Somebody who contribute to fatprogs should be careful for that. You can use
+*fosslight scanner* to check license for free. (https://fosslight.org/)
+
+# TODO
+* More optimization for logic of traversing file tree and memory.
 * Improve build script for cross compile.
 * fatprogs does not support code page.
