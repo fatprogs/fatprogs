@@ -170,22 +170,26 @@ If \fB\-a\fP and \fB\-r\fP are absent, the file system is only checked,
 but not repaired.
 .SH "EXIT STATUS"
 .IP 0
+.PD 0
 No recoverable errors have been detected.
 .IP 1
 Recoverable errors have been detected or \fBdosfsck\fP has discovered an
 internal inconsistency. And errors are corrected.
-.IP 2
-It's not FAT filesystem. \fBdosfsck\fP did not access the file system.
 .IP 4
 Errors are detected, but some of them are not corrected.
 .IP 8
 \fBdosfsck\fP exit during operation with error, or unmanageable situation.
 .IP 16
 Usage error. check usage using '\fBdosfsck --help'\fP.
+.IP 32
+File system checking canceled by user request.
 .IP 64
+It's not FAT filesystem. \fBdosfsck\fP did not access the file system.
+.IP 128
 System call like open/read/write/lseek error.
 .SH FILES
 .IP "FOUND.000, FOUND.001, ..."
+.PD
 When recovering orphan cluster, recovered file are stored in these directories.
 Each directory of FOUND.NNN can include 10 thousand files which named 'FSCKNNNN.REC'.
 .IP "FSCK0000.REC, FSCK0001.REC, ..."

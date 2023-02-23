@@ -38,12 +38,14 @@
 typedef enum {
     EXIT_NO_ERRORS      = 0x00,
     EXIT_CORRECTED      = 0x01,
-    EXIT_NOT_SUPPORT    = 0x02,
+    EXIT_NEED_REBOOT	= 0x02,
     EXIT_ERRORS_LEFT    = 0x04,
     EXIT_OPERATION_ERROR = 0x08,
     EXIT_SYNTAX_ERROR   = 0x10,
     EXIT_USER_CANCEL    = 0x20,
-    EXIT_SYSCALL_ERROR  = 0x40,
+    EXIT_SYSCALL_ERROR  = 0x80,
+
+    EXIT_NOT_SUPPORT    = 0x40,	/* Additional error code for target format wrong */
 } exit_type_t;
 
 /* Displays a prinf-style message and terminates the program. */

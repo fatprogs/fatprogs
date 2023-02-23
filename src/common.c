@@ -45,7 +45,7 @@ void pdie(char *msg,...)
     vfprintf(stderr, msg, args);
     va_end(args);
     fprintf(stderr,":%s\n", strerror(errno));
-    exit(EXIT_SYSCALL_ERROR);
+    exit(EXIT_OPERATION_ERROR);
 }
 
 void *alloc_mem(int size)
