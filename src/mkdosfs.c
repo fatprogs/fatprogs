@@ -502,7 +502,7 @@ static void check_mount(char *device_name)
 
     while ((mnt = getmntent(f)) != NULL)
         if (strcmp(device_name, mnt->mnt_fsname) == 0)
-            die("%s contains a mounted file system.");
+            die("%s contains a mounted file system.", device_name);
 
     endmntent(f);
 }
@@ -550,7 +550,7 @@ static void establish_params(int device_num, int size)
         else {
             /*  Can we get the diskette geometry? */
             if (ioctl(dev, FDGETPRM, &param))
-                die("unable to get diskette geometry for '%s'");
+                die("unable to get diskette geometry for '%s'", device_name);
         }
 
         /*  Set up the geometry information */
@@ -1657,7 +1657,7 @@ int main(int argc, char **argv)
         /* Is it a suitable device to build the FS on? */
         dev = open(device_name, O_EXCL | O_RDWR);
         if (dev < 0)
-            die("unable to open %s");
+            die("unable to open %s", device_name);
     }
     else {
         off_t offset = blocks * BLOCK_SIZE - 1;
@@ -1665,7 +1665,7 @@ int main(int argc, char **argv)
         /* create the file */
         dev = open(device_name, O_EXCL | O_RDWR | O_CREAT | O_TRUNC, 0666);
         if (dev < 0)
-            die("unable to create %s");
+            die("unable to create %s", device_name);
 
         /* seek to the intended end-1, and write one byte. this creates a
          * sparse-as-possible file of appropriate size. */
@@ -1680,7 +1680,7 @@ int main(int argc, char **argv)
     }
 
     if (fstat(dev, &statbuf) < 0)
-        die("unable to stat %s");
+        die("unable to stat %s", device_name);
 
     if (!S_ISBLK(statbuf.st_mode)) {
         statbuf.st_rdev = 0;
@@ -1700,7 +1700,8 @@ int main(int argc, char **argv)
                     (statbuf.st_rdev & 0xff3f) == 0x0d00 || /* xd */
                     (statbuf.st_rdev & 0xff3f) == 0x1600)  /* hdc, hdd */
            )
-            die("Will not try to make filesystem on full-disk device '%s' (use -I if wanted)");
+		die("Will not try to make filesystem on full-disk device '%s'"
+				"(use -I if wanted)", device_name);
 
     if (sector_size_set) {
         if (ioctl(dev, BLKSSZGET, &min_sector_size) >= 0)
