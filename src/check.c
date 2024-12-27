@@ -901,10 +901,21 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
             return 0;
         }
 
-        if ((file->parent == root) && FSTART(file, fs) != 0) {
-            printf("%s\n  Volume label has start cluster. Fix it to 0.\n",
-                    path_name(file));
-            MODIFY_START(file, 0, fs);
+        if ((file->parent == root) &&
+                ((FSTART(file, fs) != 0) ||
+                 (CF_LE_L(file->dir_ent.size) != 0))) {
+            if (FSTART(file, fs) != 0) {
+                printf("%s\n  Volume label has start cluster. Fix it to 0.\n",
+                        path_name(file));
+                MODIFY_START(file, 0, fs);
+            }
+
+            if (CF_LE_L(file->dir_ent.size) != 0) {
+                printf("%s\n  Volume label has non-zero length. Fix it to 0.\n",
+                        path_name(file));
+                MODIFY(file, size, 0);
+            }
+
             return 0;
         }
     }
