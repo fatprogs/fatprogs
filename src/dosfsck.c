@@ -217,7 +217,7 @@ int main(int argc, char **argv)
     /* sync for modified data */
     ret = fs_flush(rw);
 
-    if (!remain_dirty)
+    if (!remain_dirty && rw)
         clean_dirty_flag(&fs);
 
     if (fs.fat_cache.addr) {
