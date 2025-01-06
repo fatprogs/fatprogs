@@ -74,7 +74,14 @@ fatprogs was tested on x86-64, aarch64. fatprogs built and tested
 on full 64bit on x86-64, and with -m32 option on aarch64.
 
 ## Corrupted Images
-test script for fatprogs are in [here](https://github.com/jaysim/fat32_bad_images)
+Corrupted Images for fatprogs test are in [here](https://github.com/fatprogs/fat32_bad_images)
+You may test all corrupted images executing script *test\_all\_images.sh* in tests directory.
+Script will clone images from above repository, and test all images.
+
+```
+cd tests
+./test_all_images
+```
 
 Tested images deatils are described in README file above link.
 
@@ -87,16 +94,16 @@ result is memory usage of fatprogs and latest dosfstools, mesasured by
 Data is average value of each corrupted images category.
 
 <pre>
-fat32\_bad\_ccXX.dump     : 1G volume, 4K cluster, about 20 files
-fat32\_bad\_deXX.dump     : 1G volume, 4K cluster, about 100 files
-fat32\_bad\_entXX.dump    : 1G volume, 4K cluster, about 370 files
-fat32\_bad\_dirtyXX.dump  : 1G volume, 4K cluster, about 100 files
-fat32\_bad\_fsinfoXX.dump : 1G volume, 4K cluster
-fat32\_bad\_lfnXX.dump    : 1G volume, 4K cluster, about 60 files
-fat32\_bad\_volXX.dump    : 1G volume, 4K cluster
+fat32_bad_ccXX.dump     : 1G volume, 4K cluster, about 20 files
+fat32_bad_deXX.dump     : 1G volume, 4K cluster, about 100 files
+fat32_bad_entXX.dump    : 1G volume, 4K cluster, about 370 files
+fat32_bad_dirtyXX.dump  : 1G volume, 4K cluster, about 100 files
+fat32_bad_fsinfoXX.dump : 1G volume, 4K cluster
+fat32_bad_lfnXX.dump    : 1G volume, 4K cluster, about 60 files
+fat32_bad_volXX.dump    : 1G volume, 4K cluster
 
-fat32\_large.dump        : 32G volume, 4K cluster, about 400 files, full
-fat32\_large\_16k.dump    : 32G volume, 16K cluster, about 400 files, full
+fat32_large.dump        : 32G volume, 4K cluster, about 400 files, full
+fat32_large_16k.dump    : 32G volume, 16K cluster, about 400 files, full
 </pre>
 
 	Memory Usage (unit: KB - ratio: fatprogs/dosfstools value)
