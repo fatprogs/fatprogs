@@ -411,17 +411,35 @@ int fs_changed(void)
     return !!changes || did_change;
 }
 
-void *fs_mmap(void *addr, off_t offset, int length)
+void *fs_mmap(void *addr, off_t offset, size_t length)
 {
     void *ret_addr = NULL;
 
-    ret_addr = mmap(addr, length, PROT_READ, MAP_SHARED | MAP_POPULATE, fd, offset);
-    if (ret_addr == NULL) {
+    /*
+     * When mmap() is called with the MAP_POPULATE flag
+     * in certain kernel version (specially tested on 5.4 and 6.11),
+     * the kernel does not return if opened device is removed.
+     * Therefore, remove the MAP_POPULATE flag and handle the SIGBUS signal
+     * that occurs when accessing memory mapped address afterwards.
+     */
+    ret_addr = mmap(addr, length, PROT_READ, MAP_SHARED, fd, offset);
+    if (ret_addr == NULL || ret_addr == MAP_FAILED)
         pdie("mmap %ld offset failed", offset);
-    }
 
     return ret_addr;
 }
+
+int fs_munmap(void *addr, size_t length)
+{
+    int ret;
+
+    ret = munmap(addr, length);
+    if (ret < 0)
+        pdie("munmap (%p:%ld) failed", addr, length);
+
+    return ret;
+}
+
 
 /* Local Variables: */
 /* tab-width: 8     */

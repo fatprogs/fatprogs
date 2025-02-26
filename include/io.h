@@ -46,8 +46,8 @@ void fs_close(void);
 /* Determines whether the file system has changed. See fs_close. */
 int fs_changed(void);
 
-void *fs_mmap(void *hint, off_t offset, int length);
-#define fs_munmap    munmap
+void *fs_mmap(void *hint, off_t offset, size_t length);
+int fs_munmap(void *addr, size_t length);
 
 /* Print wrong data in CHNAGE lists */
 void print_changes(void);

@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <signal.h>
 
 #include "common.h"
 #include "dosfsck.h"
@@ -53,6 +54,27 @@ static void usage(char *name)
     fprintf(stderr, "  -y       same as -a, for compat with other *fsck\n");
 }
 
+/* SIGBUS signal handler. It is only useful for mmap without POPULATE and
+ * try to access to their mmapped address that device was already gone. */
+static void handle_signal(int signum)
+{
+    pdie("Received SIGBUS signal, exit!!\n");
+}
+
+static int setup_signal(void)
+{
+    struct sigaction sa;
+
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = handle_signal;
+
+    if (sigaction(SIGBUS, &sa, NULL) != 0) {
+        fprintf(stderr, "ERR: failed to set signal handler\n");
+        return -1;
+    }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     DOS_FS fs;
@@ -65,6 +87,8 @@ int main(int argc, char **argv)
     rw = 1;
     interactive = 1;
     check_atari(&atari_format);
+
+    setup_signal();
 
     while ((c = getopt(argc, argv, "AaCd:flnrtu:vVwy")) != EOF) {
         switch (c) {
