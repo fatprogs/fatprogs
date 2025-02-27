@@ -17,6 +17,7 @@ typedef enum fat_select {
    replaces broken FATs and rejects invalid cluster entries. */
 void read_fat(DOS_FS *fs);
 
+void get_fat_entry(DOS_FS *fs, uint32_t cluster, uint32_t *value, void *fat);
 void get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value);
 void modify_fat(DOS_FS *fs, uint32_t cluster, uint32_t new);
 

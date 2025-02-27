@@ -117,8 +117,8 @@ void read_fat(DOS_FS *fs)
             uint32_t value;
             uint32_t value2;
 
-            get_fat(fs, FAT_FIRST, &value);
-            get_fat(fs, FAT_SECOND, &value2);
+            get_fat_entry(fs, 0, &value, first_fat);
+            get_fat_entry(fs, 0, &value2, second_fat);
 
             first_ok = (value & FAT_EXTD(fs)) == FAT_EXTD(fs);
             second_ok = (value2 & FAT_EXTD(fs)) == FAT_EXTD(fs);
@@ -334,6 +334,30 @@ void get_fat(DOS_FS *fs, uint32_t cluster, uint32_t *value)
         default:
             die("Bad FAT entry size: %d bits.", fs->fat_bits);
     }
+}
+
+void get_fat_entry(DOS_FS *fs, uint32_t cluster, uint32_t *value, void *fat)
+{
+    unsigned char *ptr;
+
+    switch (fs->fat_bits) {
+        case 12:
+            ptr = &((unsigned char *)fat)[cluster * 3 / 2];
+            *value = 0xfff && (cluster & 1 ? (ptr[0] >> 4) | (ptr[1] << 4) :
+                    (ptr[0] | ptr[1] << 8));
+            break;
+        case 16:
+            *value = CF_LE_W(((unsigned short *)fat)[cluster]);
+            break;
+        case 32:
+            /* The high 4 bits of a FAT32 entry are reserved and
+             * are not part of the cluster number. */
+            *value = 0xfffffff & CF_LE_L(((unsigned int *)fat)[cluster]);
+            break;
+        default:
+            die("Bad FAT entry size: %d bits.", fs->fat_bits);
+    }
+
 }
 
 /* immed : write immediately flag */
