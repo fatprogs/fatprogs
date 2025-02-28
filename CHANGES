@@ -1,3 +1,14 @@
+fatprogs v2.13.3 - released 2022-7-18
+=====================================
+
+BUG FIXES:
+  * dosfsck: fix the incorrect media type comparison
+  * dosfsck: remove the MAP_POPULATE flag from the mmap() call
+  * dosfsck: fix the attempt to clean the volume dirty flag
+              even when using the '-n' option.
+  * dosfsck: fix volume lable check missing
+  * test: add testing script for corruted images
+
 fatprogs v2.13.0 - released 2022-7-18
 =====================================
 
@@ -13,7 +24,7 @@ NEW FEATURES:
  * dosfsdump: add option to redirect dump data to standard output.
  * dosfsck: use FOUND.XXX directory for reclaimed files.
 
-BUF FIXES:
+BUG FIXES:
  * mkdosfs: fix wrong root directory initialization.
  * dosfsck: check boot signature more strictly to distinguish from ntfs.
  * dosfsck: remove checking time field of dot/dotdot entry.
