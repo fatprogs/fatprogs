@@ -1,7 +1,8 @@
-fatprogs v2.13.3 - released 2022-7-18
+fatprogs v2.14.0 - released 2025-3-10
 =====================================
 
-BUG FIXES:
+CHANGES:
+  * io: reimplement fsync() as sync_file_range()
   * dosfsck: fix the incorrect media type comparison
   * dosfsck: remove the MAP_POPULATE flag from the mmap() call
   * dosfsck: fix the attempt to clean the volume dirty flag
