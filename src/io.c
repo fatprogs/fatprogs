@@ -15,6 +15,10 @@
 
 /* Copyright (c) 2022 LG Electronics Inc. */
 
+#ifdef CONFIG_SYNC_FILE_RANGE
+#define _GNU_SOURCE
+#include <fcntl.h>
+#endif
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -38,6 +42,7 @@ typedef struct _change {
 
 static CHANGE *changes, *last;
 static int fd, did_change = 0;
+static off_t dev_size;
 
 unsigned device_no;
 
@@ -86,6 +91,9 @@ void fs_open(char *path, int rw)
         /* telling "floppy" for A:/B:, "ramdisk" for the rest */
     }
 #endif
+    dev_size = lseek(fd, 0, SEEK_END);
+    if (dev_size <= 0)
+        pdie("Can't get device size\n");
 }
 
 /* Find whether data in position has modified on CHANGE list,
@@ -379,6 +387,43 @@ static void __fs_flush(void)
     }
 }
 
+#ifdef CONFIG_SYNC_FILE_RANGE
+#define CHUNK_SIZE	(512 * 1024 * 1024)
+/* NOTE: Using sync_file_range() function does not portable */
+void fs_sync(void)
+{
+    off_t offset = 0;
+    size_t chunk_size = CHUNK_SIZE;
+    size_t bytes_to_sync = 0;
+
+    /* Request writeback */
+	while (offset < dev_size) {
+		bytes_to_sync = (dev_size - offset) < chunk_size ?
+			(dev_size - offset) : chunk_size;
+
+		if (sync_file_range(fd, offset, bytes_to_sync,
+					SYNC_FILE_RANGE_WAIT_BEFORE | SYNC_FILE_RANGE_WRITE) == -1)
+			pdie("sync_file_range(): SYNC_FILE_RANGE_WAIT_AFTER");
+
+		offset += bytes_to_sync;
+	}
+
+	/* Wait for IO completion */
+	bytes_to_sync = 0;
+	offset = 0;
+	while (offset < dev_size) {
+		bytes_to_sync = (dev_size - offset) < chunk_size ?
+			(dev_size - offset) : chunk_size;
+
+		if (sync_file_range(fd, offset, bytes_to_sync,
+					SYNC_FILE_RANGE_WAIT_AFTER) == -1)
+			pdie("sync_file_range(): SYNC_FILE_RANGE_WAIT_AFTER");
+
+		offset += bytes_to_sync;
+	}
+}
+#endif
+
 int fs_flush(int write)
 {
     CHANGE *next;
@@ -396,7 +441,11 @@ int fs_flush(int write)
             changes = next;
         }
     }
+#ifdef CONFIG_SYNC_FILE_RANGE
+    fs_sync();
+#else
     fsync(fd);
+#endif
     return changed || did_change;
 }
 
