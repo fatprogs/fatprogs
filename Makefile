@@ -6,7 +6,8 @@ TOPDIR := $(shell pwd)
 
 CC = gcc
 CPP = $(CC) -E
-OPTFLAGS = -O2 -fomit-frame-pointer -D_FILE_OFFSET_BITS=64
+DEFINES = -D_FILE_OFFSET_BITS=64 -DCONFIG_SYNC_FILE_RANGE
+OPTFLAGS = -O2 -fomit-frame-pointer ${DEFINES}
 WARNFLAGS = -Wall
 DEBUGFLAGS =
 CFLAGS = $(OPTFLAGS) $(WARNFLAGS) $(DEBUGFLAGS) -I$(TOPDIR)/include
@@ -26,10 +27,10 @@ distclean:
 	$(MAKE) -C src $@
 	rm -f TAGS .#* .new* \#*# *~
 
-debug: OPTFLAGS = -g -fno-omit-frame-pointer -D_FILE_OFFSET_BITS=64 -DDEBUG -pg
+debug: OPTFLAGS = -g -fno-omit-frame-pointer -DDEBUG -pg ${DEFINES}
 debug: all
 
-asan: OPTFLAGS = -g -fno-omit-frame-pointer -D_FILE_OFFSET_BITS=64 -O0 -fsanitize=address
+asan: OPTFLAGS = -g -fno-omit-frame-pointer -O0 -fsanitize=address ${DEFINES}
 asan: LDFLAGS += -fsanitize=address
 asan: all
 
