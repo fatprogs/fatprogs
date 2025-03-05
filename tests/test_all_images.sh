@@ -48,7 +48,7 @@ echo "====================="
 echo "Test corrupted images"
 echo "====================="
 sleep 2
-setsid /bin/bash -c "cd ${REPO_NAME} && ./script/test_fsck_verification.py ${FATPROGS_FSCK} ${DOSFSTOOLS_FSCK} ${TEST_DIR}"
+/bin/bash -c "cd ${REPO_NAME} && ./script/test_fsck_verification.py ${FATPROGS_FSCK} ${DOSFSTOOLS_FSCK} ${TEST_DIR}"
 RET=$?
 if [ $RET -ne 0 ]; then
 	echo "Failed to test for repairing corrupted images"
@@ -57,7 +57,7 @@ fi
 
 if [ ${CHECKOUT_BR} != "main" ]; then
 	echo "Delete working branch ${CHECKOUT_BR}... "
-	setsid /bin/bash -c "cd ${REPO_NAME} && git branch -D ${CHECKOUT_BR}"
+	/bin/bash -c "cd ${REPO_NAME} && git branch -D ${CHECKOUT_BR}"
 fi
 
 echo "Sucess to test corrupted images"
