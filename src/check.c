@@ -277,6 +277,11 @@ uint32_t alloc_found_entry(DOS_FS *fs, int force_create)
     if (!dir || force_create) {
         DIR_ENT de = {0, };
         DOS_FILE *walk = NULL;
+        struct tm *ctime;
+        time_t current;
+
+        time(&current);
+        ctime = localtime(&current);
 
         /* if there is no FOUND.XXX, make 'FOUND.000' */
         offset = __alloc_entry(fs, FSTART(root, fs), ATTR_DIR, &new);
@@ -298,6 +303,17 @@ uint32_t alloc_found_entry(DOS_FS *fs, int force_create)
         de.attr = ATTR_DIR;
         de.start = CT_LE_W(new & 0xffff);
         de.starthi = CT_LE_W(new >> 16);
+
+        de.time = CT_LE_W((unsigned short)((ctime->tm_sec >> 1) +
+                    (ctime->tm_min << 5) + (ctime->tm_hour << 11)));
+        de.date = CT_LE_W((unsigned short)(ctime->tm_mday +
+                    ((ctime->tm_mon + 1) << 5) +
+                    ((ctime->tm_year - 80) << 9)));
+        de.ctime_ms = 0;
+        de.ctime = de.time;
+        de.cdate = de.date;
+        de.adate = de.date;
+
         fs_write(offset, sizeof(de), &de);
 
         /* add FOUND.XXX to DOS_FILE structure */
@@ -789,6 +805,17 @@ static void rename_file(DOS_FS *fs, DOS_FILE *file)
     }
 }
 
+#ifdef DEBUG
+static void check_time_fields(DIR_ENT *de)
+{
+    if (strncmp("FSCK", &de->name, 4) == 0) {
+        printf("ctime %d, cdate %d, adate %d, time %d, date %d\n", de->ctime, de->cdate, de->adate, de->time, de->date);
+    }
+    if (de->ctime == 0 || de->cdate == 0 || de->adate == 0 || de->time == 0 || de->date == 0)
+        printf("time has been set zero. name:%s\n", de->name);
+}
+#endif
+
 /*
  * check lists in check_file().
  *
@@ -823,6 +850,9 @@ static int check_file(DOS_FS *fs, DOS_FILE *file)
                            shared with same cluster */
     uint32_t next_clus;
 
+#ifdef DEBUG
+    check_time_fields(&file->dir_ent);
+#endif
     if (!IS_DIR(file->dir_ent.attr) && !IS_FILE(file->dir_ent.attr) &&
             !IS_VOLUME_LABEL(file->dir_ent.attr)) {
         printf("%s\n  Invalid attribute."

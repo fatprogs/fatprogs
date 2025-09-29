@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
 
 #include "common.h"
 #include "dosfsck.h"
@@ -647,6 +648,11 @@ void reclaim_file(DOS_FS *fs)
 {
     int reclaimed, files;
     uint32_t i, next, walk;
+    struct tm *ctime;
+    time_t current;
+
+    time(&current);
+    ctime = localtime(&current);
 
     if (verbose)
         printf("Reclaiming unconnected clusters.\n");
@@ -749,6 +755,17 @@ void reclaim_file(DOS_FS *fs)
             }
 
             de.size = CT_LE_L(clus_cnt * fs->cluster_size);
+
+            de.time = CT_LE_W((unsigned short)((ctime->tm_sec >> 1) +
+                        (ctime->tm_min << 5) + (ctime->tm_hour << 11)));
+            de.date = CT_LE_W((unsigned short)(ctime->tm_mday +
+                        ((ctime->tm_mon + 1) << 5) +
+                        ((ctime->tm_year - 80) << 9)));
+            de.ctime_ms = 0;
+            de.ctime = de.time;
+            de.cdate = de.date;
+            de.adate = de.date;
+
             reclaimed += clus_cnt;
 
             fs_write(offset, sizeof(DIR_ENT), &de);
