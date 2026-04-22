@@ -14,10 +14,10 @@ dosfsdump: $(COMMON_OBJECTS) dosfsdump.o
 	$(CC) -o $@ $(LDFLAGS) $^
 
 mkdosfs: $(COMMON_OBJECTS) mkdosfs.o
-	$(CC) -o $@ $(LDFLAGS) $^
+	$(CC) -o $@ $(LDFLAGS) $^ $(BLKID_LIBS)
 
 .c.o:
-	$(CC) -c $(CFLAGS) $*.c
+	$(CC) -c $(CFLAGS) $(BLKID_CFLAGS) $*.c
 
 install: dosfsck mkdosfs
 	mkdir -p $(SBINDIR) $(MANDIR)
