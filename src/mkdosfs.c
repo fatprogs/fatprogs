@@ -77,6 +77,10 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA. */
 
 #include "dosfs.h"
 #include "common.h"
+#ifdef HAVE_LIBBLKID
+#include <blkid/blkid.h>
+#endif
+
 
 /* In earlier versions, an own llseek() was used, but glibc lseek() is
  * sufficient (or even better :) for 64 bit offsets in the meantime */
@@ -209,6 +213,7 @@ static char *program_name = "mkdosfs";	/* Name of the program */
 static char *device_name = NULL;	/* Name of the device on which to create the filesystem */
 static int check = FALSE;	/* Default to no readablity checking */
 static int verbose = 0;		/* Default to verbose mode off */
+static int force_format = 0;	/* Default to not forcing overwrite of foreign FS */
 static long volume_id;		/* Volume ID number */
 static time_t create_time;	/* Creation time */
 static char volume_name[] = LABEL_NONAME; /* Volume name */
@@ -506,6 +511,57 @@ static void check_mount(char *device_name)
 
     endmntent(f);
 }
+
+/**
+ * check_existing_filesystem - Check if the device already has a filesystem
+ * @dev_name: Device name (e.g., /dev/sdc1)
+ *
+ * Returns: A duplicated string containing the detected filesystem type if found,
+ *          NULL if no filesystem is detected or on probe failure.
+ */
+#ifdef HAVE_LIBBLKID
+static const char *check_existing_filesystem(const char *dev_name)
+{
+    blkid_probe pr = NULL;
+    const char *fstype = NULL;
+
+    pr = blkid_new_probe_from_filename(dev_name);
+    if (!pr) {
+        fprintf(stderr, "Failed to create blkid probe for %s\n", dev_name);
+        return NULL;
+    }
+
+    /* Enable superblock probing */
+    blkid_probe_enable_superblocks(pr, 1);
+    blkid_probe_set_superblocks_flags(pr, BLKID_SUBLKS_TYPE);
+
+    /* Probe succeeded */
+    if (blkid_do_safeprobe(pr) == 0) {
+        if (blkid_probe_lookup_value(pr, "TYPE", &fstype, NULL) == 0) {
+            if (verbose)
+                printf("Detected filesystem type: %s\n", fstype);
+
+            if (fstype) {
+                // Return the detected type to let the caller decide
+                // We need to duplicate fstype because the probe will be freed
+                char *type_dup = strdup(fstype);
+                blkid_free_probe(pr);
+                return type_dup;
+            }
+        }
+    } else if (verbose) {
+        printf("No filesystem detected on %s.\n", dev_name);
+    }
+
+    blkid_free_probe(pr);
+    return NULL;
+}
+#else
+static const char *check_existing_filesystem(const char *dev_name)
+{
+    return NULL;
+}
+#endif
 
 /* Establish the geometry and media parameters for the device */
 static void establish_params(int device_num, int size)
@@ -1379,7 +1435,7 @@ void usage(void)
             [-m boot-msg-file] [-n volume-name] [-i volume-id] [-B bootcode]\n\
             [-s sectors-per-cluster] [-S logical-sector-size] [-f number-of-FATs]\n\
             [-h hidden-sectors] [-F fat-size] [-r root-dir-entries] [-R reserved-sectors]\n\
-            /dev/name [blocks]\n");
+            [-X force overwrite] /dev/name [blocks]\n");
 }
 
 /* The "main" entry point into the utility - we pick up the options
@@ -1411,11 +1467,14 @@ int main(int argc, char **argv)
 
     printf("%s " VERSION " (" VERSION_DATE ")\n", program_name);
 
-    while ((c = getopt(argc, argv, "AB:b:cCf:F:Ii:l:m:n:r:R:s:S:h:v")) != EOF) {
+    while ((c = getopt(argc, argv, "AB:b:cCf:F:Ii:l:m:n:r:R:s:S:h:vX")) != EOF) {
         /* Scan the command line for options */
         switch (c) {
             case 'A':		/* toggle Atari format */
                 atari_format = !atari_format;
+                break;
+            case 'X':		/* X : force overwrite of foreign FS */
+                force_format = 1;
                 break;
             case 'b':		/* b : location of backup boot sector */
                 backup_boot = (int)strtol(optarg, &tmp, 0);
@@ -1658,6 +1717,23 @@ int main(int argc, char **argv)
         dev = open(device_name, O_EXCL | O_RDWR);
         if (dev < 0)
             die("unable to open %s", device_name);
+
+        const char *existing_fs = check_existing_filesystem(device_name);
+        if (existing_fs) {
+            if (!force_format) {
+                fprintf(stderr, "Device %s already contains a %s filesystem.\n",
+                        device_name, existing_fs);
+                printf("Proceed anyway? (y,N) ");
+                fflush(stdout);
+
+                int c = getchar();
+                if (c != 'y' && c != 'Y') {
+                    free(existing_fs);
+                    die("Aborting due to existing filesystem.");
+                }
+            }
+            free(existing_fs);
+        }
     }
     else {
         off_t offset = blocks * BLOCK_SIZE - 1;
