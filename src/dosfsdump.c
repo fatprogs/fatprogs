@@ -1,8 +1,9 @@
+/* SPDX-FileCopyrightText : (c) 2022-2026 LG Electronics Inc. */
 /* SPDX-License-Identifier : GPL-2.0 */
 
-/* Copyright (c) 2022 LG Electronics Inc. */
+/* Copyright (c) 2022-2026 LG Electronics Inc. */
 
-#include "version.h"
+#include "config.h"
 
 #include <stdio.h>
 #include <stdlib.h>

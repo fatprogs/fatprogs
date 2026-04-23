@@ -1,3 +1,4 @@
+/* SPDX-FileCopyrightText : (c) 2022-2026 LG Electronics Inc. */
 /* SPDX-License-Identifier : GPL-2.0 */
 
 /* lfn.c  -  Functions for handling VFAT long filenames */

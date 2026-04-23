@@ -28,43 +28,97 @@ Tested results are attached below.
 
 # Build & Installation
 
-Build target 'distclean' will remove all object and execution files. And
-'clean' will remove all object files except execution files.
+This project now uses the GNU autotools build system (autoconf / automake / libtool).
+
+You should generate 'configure' and 'Makefile' files first by running:
 
 ```
-$ make [distclean | clean]
-
-$ make
-$ make install
+./autogen.sh
 ```
 
-## Other build target
-'asan' represent building with address sanitizer library for runtime memory debugging.
-'debug' build will include debug information to trace code well with tools like gdb.
+Then configure, build and install as usual:
 
 ```
-$ make debug
-$ make asan
+./configure [--prefix=/usr/local]    # see ./configure --help for options
+make
+make install
 ```
 
-# Yocto build
-fatprogs verified the cross build test only in yocto. You may should add below
-statement in your bb/bbappend file to build fatprogs, which refer to dosfstools bb file
-in meta-gplv2.
+Cleaning targets provided by the generated Makefiles:
 
 ```
+make clean      # remove object files
+make distclean  # remove generated files (configure, Makefile, etc.)
+```
+
+Note: If libblkid is not available, features that filesystem detection in mkdosfs will be disabled.
+
+## Debug & AddressSanitizer builds
+
+Pass CFLAGS/LDFLAGS to configure to enable debug or sanitizers. Examples:
+
+Debug build (no optimizations, with debug symbols):
+
+```
+CFLAGS='-g -O0' ./configure
+make
+```
+
+address sanitizer build:
+
+```
+# Configure and build with address sanitizer enabled
+
+CFLAGS='-g -O1 -fsanitize=address -fno-omit-frame-pointer' LDFLAGS='-fsanitize=address' ./configure --prefix=/usr/local
+make -j$(nproc)
+```
+
+After building with address sanitizer, you may verify the binaries and test it.
+
+```
+ldd src/dosfsck | grep -i asan
+file src/dosfsck
+
+# run a quick test (ASAN_OPTIONS can be used to tune output)
+ASAN_OPTIONS=verbosity=1 ./src/dosfsck -V /path/to/test.img
+```
+
+## Cross-compilation
+
+### Using 'configure' options
+Use autotools options for cross-compiling and override CC/CFLAGS/LDFLAGS as needed.
+Example:
+
+```
+./configure --host=arm-linux-gnueabihf CC=arm-linux-gnueabihf-gcc \
+            CFLAGS='-D_FILE_OFFSET_BITS=64 -I/path/to/sysroot/include' \
+            LDFLAGS='-L/path/to/sysroot/lib'
+make
+```
+
+### Using yocto build
+
+When building in yocto, you may need to add following example in your bb/bbappend file to build fatprogs.
+
+```
+inherit autotools pkgconfig
+
 SRC_URI = "git://github.com/fatprogs-org/fatprogs.git;branch=main;protocol=https"
 
 S = "${WORKDIR}/git"
 
 CFLAGS += "-D_GNU_SOURCE -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 -I${S}/include"
 
-TARGET_CC_ARCH += "${LDFLAGS}"
-EXTRA_OEMAKE = "CC='${CC}' CFLAGS='${CFLAGS}' LDFAGS='${LDFLAGS}'"
+EXTRA_OEMAKE = "CC='${CC}' CFLAGS='${CFLAGS}' LDFLAGS='${LDFLAGS}'"
 
-do_install() {
-        oe_runmake "PREFIX=${D}" "SBINDIR=${D}${base_sbindir}" \
-                "MANDIR=${D}${mandir}/man8" install
+do_install:prepend() {
+    if [ -d ${S}/src ] && [ -d ${B}/src ]; then
+        for f in ${S}/src/*.8; do
+            if [ -f "$f" ]; then
+                install -m 644 "$f" ${B}/src/
+            fi
+        done
+    fi
 }
 
 ```

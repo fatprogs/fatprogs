@@ -1,3 +1,4 @@
+/* SPDX-FileCopyrightText : (c) 2022-2026 LG Electronics Inc. */
 /* SPDX-License-Identifier : GPL-2.0 */
 
 /* check.c  -  Check and repair a PC/MS-DOS file system */
@@ -7,7 +8,7 @@
 /* FAT32, VFAT, Atari format support, and various fixes additions May 1998
  * by Roman Hodek <Roman.Hodek@informatik.uni-erlangen.de> */
 
-/* Copyright (c) 2022 LG Electronics Inc. */
+/* Copyright (c) 2022-2026 LG Electronics Inc. */
 
 #include <stdio.h>
 #include <stdlib.h>

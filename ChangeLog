@@ -1,0 +1,86 @@
+fatprogs v2.13.3 - released 2022-7-18
+=====================================
+
+BUG FIXES:
+  * dosfsck: fix the incorrect media type comparison
+  * dosfsck: remove the MAP_POPULATE flag from the mmap() call
+  * dosfsck: fix the attempt to clean the volume dirty flag
+              even when using the '-n' option.
+  * dosfsck: fix volume lable check missing
+  * test: add testing script for corruted images
+
+fatprogs v2.13.0 - released 2022-7-18
+=====================================
+
+CHANGES:
+ * dosfsck: dirty flag clean after all changes are flushed.
+ * dosfsck: remove 'reclaim_bitmap' field while reuse 'bitmap' for reclaiming.
+ * dosfsck: change default action(removal) for corrupted LFN.
+ * dosfsck: modify file size field instead of trucating file.
+ * dosfsdump: make default option to dump metadata only.
+ * dosfsck: consider corrupted directory if it has too many bad files.
+
+NEW FEATURES:
+ * dosfsdump: add option to redirect dump data to standard output.
+ * dosfsck: use FOUND.XXX directory for reclaimed files.
+
+BUG FIXES:
+ * mkdosfs: fix wrong root directory initialization.
+ * dosfsck: check boot signature more strictly to distinguish from ntfs.
+ * dosfsck: remove checking time field of dot/dotdot entry.
+ * mkdosfs: fix wrong media type location writing.
+ * dosfsck: fix FAT start offset for unaligned (with PAGE_SIZE) FAT volume.
+ * dosfsck: set EOC to first free FAT entry of root directory.
+
+
+fatprogs v2.12.2 - released 2022-5-08
+=====================================
+
+CHANGES:
+ * change version string definition.
+ * several bugs fixed.
+
+
+fatprogs v2.12.1 - released 2022-4-30
+=====================================
+
+CHANGES:
+ * dosfsck: minimize memory using bitmap.
+ * dosfsck: improve performance on changed list, FAT read, etc.
+ * mkdosfs: minimize memory for FAT read.
+ * Makefile: add target for debugging with address sanitizer.
+ * Apply pread/pwrite instead of lseek and read/write.
+
+NEW FEATURES:
+ * dosfsdump: add dump tool for debugging.
+ * dosfsck: read FAT from mmap memory.
+
+BUG FIXES:
+ * dosfsck: fix wrong calculated FAT size to read.
+
+Move version.h to 'include' directory.
+
+
+fatprogs v2.12.0 - released 2022-3-30
+=====================================
+Since fatprogs starts from dosfstools(v2.11) project, decide that
+the version also starts with the last version.
+
+CHANGES:
+ * Apply last GPL v2 licensed version of dosfstools (v2.11)
+ * Apply patches of distributor released under GPL v2 license.
+ * Seperate source and header and put all sources in one directory.
+
+NEW FEATURES:
+ * dosfsck: Add handling volume label in boot sector and volume entry in
+ root directory entry.
+ * dosfsck: Add checking routine of dot/dotdot entries.
+ * dosfsck: Add handling volume dirty flag.
+
+BUG FIXES:
+ * dosfsck: Fix memory leaks / stack smashing using address sanitizer.
+ * dosfsck: Fix wrong truncation size of corrupted cluster.
+ * dosfsck: Fix using unproper function.(sprintf -> memcpy)
+ * dosfsck: Remove unnecessary LFN when it rename short filename.
+ * dosfsck: Free lfn resource in memory in interactive mode.
+ * dosfsck: Fix possible corruption due to multiple FAT.
