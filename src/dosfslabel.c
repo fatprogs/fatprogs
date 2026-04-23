@@ -7,7 +7,7 @@
  * Portions copyright 1993 Werner Almesberger.
  */
 
-#include "version.h"
+#include "config.h"
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -1,3 +1,4 @@
+/* SPDX-FileCopyrightText : (c) 2022-2026 LG Electronics Inc. */
 /* SPDX-License-Identifier : GPL-2.0 */
 
 /* dosfsck.c  -  User interface */
@@ -7,7 +8,7 @@
 /* FAT32, VFAT, Atari format support, and various fixes additions May 1998
  * by Roman Hodek <Roman.Hodek@informatik.uni-erlangen.de> */
 
-#include "version.h"
+#include "config.h"
 
 #include <stdio.h>
 #include <stdlib.h>

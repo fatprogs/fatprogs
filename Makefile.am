@@ -1,0 +1,9 @@
+AUTOMAKE_OPTIONS = gnu
+ACLOCAL_AMFLAGS = -I m4
+
+EXTRA_DIST = AUTHORS COPYING README.md
+
+SUBDIRS = src
+
+# Standard distribution files
+doc_DATA = README.md

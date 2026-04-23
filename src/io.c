@@ -1,3 +1,4 @@
+/* SPDX-FileCopyrightText : (c) 2022-2026 LG Electronics Inc. */
 /* SPDX-License-Identifier : GPL-2.0 */
 
 /* io.c  -  Virtual disk input/output */
@@ -13,7 +14,7 @@
 /* FAT32, VFAT, Atari format support, and various fixes additions May 1998
  * by Roman Hodek <Roman.Hodek@informatik.uni-erlangen.de> */
 
-/* Copyright (c) 2022 LG Electronics Inc. */
+/* Copyright (c) 2022-2026 LG Electronics Inc. */
 
 #ifdef CONFIG_SYNC_FILE_RANGE
 #define _GNU_SOURCE

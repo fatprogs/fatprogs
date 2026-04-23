@@ -1,3 +1,4 @@
+/* SPDX-FileCopyrightText : (c) 2022-2026 LG Electronics Inc. */
 /* SPDX-License-Identifier : GPL-2.0 */
 
 /*
@@ -54,7 +55,7 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA. */
 
 /* Include the header files */
 
-#include "version.h"
+#include "config.h"
 
 #include <fcntl.h>
 #include <linux/hdreg.h>
