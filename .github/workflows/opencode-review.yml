@@ -20,7 +20,7 @@ jobs:
         env:
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
         with:
-          model: ollama-cloud/nemotron-3-super
+          model: ollama-cloud/gemma4:31b
           prompt: |
             Review this pull request:
             - Check for code quality issues
